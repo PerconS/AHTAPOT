@@ -36,7 +36,7 @@
 </head>
 <body>
   <h1>AHTAPOT</h1>
-  <div class="sub">Suç Hanedanlığı & Mafya Yaşam Simülasyonu — <b>Faz 1: Çekirdek (UI yok)</b></div>
+  <div class="sub">Suç Hanedanlığı & Mafya Yaşam Simülasyonu — <b>Modül: Karakter · Ekol · Rütbe · Psikoloji · Yıllık Döngü (UI yok)</b></div>
 
   <div class="card">
     <h2>Durum</h2>
@@ -53,8 +53,9 @@
     <div class="sub" style="margin:0">
       Bu faz UI içermez. Tarayıcı konsolundan dene:<br />
       <code>AHTAPOT.test.selfTest()</code> — doğrulama testleri<br />
-      <code>const g = AHTAPOT.state.createNewGame(123)</code> — yeni oyun<br />
-      <code>AHTAPOT.engine.run(g, 30)</code> — 30 gün simüle et<br />
+      <code>const g = AHTAPOT.state.createNewGame(123)</code> — yeni oyun (14 yaş)<br />
+      <code>AHTAPOT.state.applyStartChoice(g, 'rob')</code> — başlangıç kararı (rob/police/gang)<br />
+      <code>AHTAPOT.engine.advanceYear(g)</code> — +1 yıl simüle et<br />
       <code>AHTAPOT.persist.save('slot1', g)</code> / <code>AHTAPOT.persist.load('slot1')</code>
     </div>
   </div>
@@ -128,8 +129,13 @@
     newsFeedMax: 40,
     aiFamilyCount: 4,
     territoryCount: 12,
-    daysPerYear: 360,
+    monthsPerYear: 12,            // tick = 1 ay; "Yaş Al" = 1 yıl = 12 tick
     aiOpBaseChance: 0.06,
+    startAge: 14,                 // BitLife tarzı genç başlangıç
+    deathAgeBase: 72,             // doğal ölüm eşiği etrafı (rng ile sapar)
+    healthDeclineAge: 50,         // bu yaştan sonra sağlık düşüşü hızlanır
+    paranoiaHallucThreshold: 70,  // bu üstünde halüsinasyon/sahte ihanet riski
+    paranoiaHallucChance: 0.12,
   };
 
   /* ----------------------------------------------------------------------
@@ -150,6 +156,34 @@
       { id: 'club', name: 'Gece Kulübü', income: 900, launder: 2000, cover: 0.55 },
     ],
     archetypes: ['aggressor', 'merchant', 'schemer', 'turtle', 'opportunist'],
+    // Suç ekolleri — çarpan tabanlı modifier'lar (1.0 = nötr). Sistemler bunları okur.
+    schools: [
+      { id: 'italian', name: 'İtalyan Mafyası', modifiers: { politicalMult: 1.20, launderCostMult: 0.95 } },
+      { id: 'yakuza', name: 'Yakuza', modifiers: { loyaltyBonus: 25, catchRiskMult: 0.90 } },
+      { id: 'cartel', name: 'Kolombiya Karteli', modifiers: { dirtyIncomeMult: 1.30, violenceMult: 1.10 } },
+      { id: 'bratva', name: 'Rus Bratva', modifiers: { violenceMult: 1.20, captureMult: 1.15 } },
+      { id: 'triad', name: 'Triad', modifiers: { tradeMult: 1.20, smugglingMult: 1.25 } },
+    ],
+    // Rütbe hiyerarşisi (8 kademe) — terfi eşikleri (saygınlık + toplam servet)
+    ranks: [
+      { id: 0, name: 'Serseri', minRep: 0, minWealth: 0 },
+      { id: 1, name: 'Çete Üyesi', minRep: 15, minWealth: 5000 },
+      { id: 2, name: 'Tetikçi', minRep: 30, minWealth: 25000 },
+      { id: 3, name: 'Kaptan', minRep: 45, minWealth: 80000 },
+      { id: 4, name: 'Sağ Kol', minRep: 58, minWealth: 250000 },
+      { id: 5, name: 'Don', minRep: 70, minWealth: 750000 },
+      { id: 6, name: 'Godfather', minRep: 82, minWealth: 3000000 },
+      { id: 7, name: 'Shadow Emperor', minRep: 92, minWealth: 15000000 },
+    ],
+    countries: ['Türkiye', 'İtalya', 'Rusya', 'Kolombiya', 'Japonya', 'A.B.D.'],
+    citiesByCountry: {
+      'Türkiye': ['İstanbul', 'İzmir', 'Mersin'],
+      'İtalya': ['Napoli', 'Palermo', 'Milano'],
+      'Rusya': ['Moskova', 'St. Petersburg'],
+      'Kolombiya': ['Medellín', 'Cali'],
+      'Japonya': ['Tokyo', 'Osaka'],
+      'A.B.D.': ['New York', 'Chicago', 'Las Vegas'],
+    },
     firstNames: ['Cesare', 'Vito', 'Salvatore', 'Enzo', 'Marco', 'Rocco', 'Dario', 'Bruno', 'Nico', 'Lorenzo', 'Kemal', 'Reis', 'Sabri', 'Cihangir', 'Davut'],
     lastNames: ['Corvino', 'Falcone', 'Moretti', 'Rizzo', 'Bellandi', 'Galante', 'Serrano', 'Drakos', 'Karadağ', 'Demirhan', 'Aslanoğlu'],
     familyNames: ['Corvino', 'Falcone', 'Moretti', 'Serrano', 'Drakos', 'Karadağ', 'Aslan', 'Bellandi'],
@@ -181,6 +215,24 @@
       'hit': [
         '{family} bir suikast düzenledi; sokakta dengeler sarsıldı.',
       ],
+      'promotion': [
+        '{name} artık bir {rank}. {family} sokakta yükseliyor.',
+        'Yükseliş: {name} {rank} rütbesine terfi etti.',
+      ],
+      'death': [
+        '{name} {age} yaşında hayata gözlerini yumdu. Bir devir kapandı.',
+        '{name} öldü ({age}). Sokaklar bir efsaneyi uğurladı.',
+      ],
+      'paranoia': [
+        '{name} herkesin kendisine ihanet ettiğini düşünüyor... ama kanıt yok. Paranoya mı, gerçek mi?',
+        '{name} gece uyuyamıyor; gölgelerde köstebekler görüyor.',
+      ],
+      'worldEconomy': [
+        'Dünya ekonomisi sarsıldı: {event}. Piyasalar yeniden şekilleniyor.',
+      ],
+      'startChoice': [
+        '{text}',
+      ],
     },
   };
 
@@ -198,7 +250,14 @@
         familyId,
         name: rng.pick(data.firstNames) + ' ' + rng.pick(data.lastNames),
         role,
-        stats: { combat: stat(), cunning: stat(), charisma: stat(), loyalty: stat(), management: stat() },
+        // BitLife tarzı yaşam öznitelikleri (üst panel)
+        attributes: { health: 100, happiness: rng.int(40, 80), intelligence: stat(), looks: stat(), reputation: rng.int(5, 25) },
+        // anlık yaşamsal değerler
+        vitals: { energy: 100, heat: 0, paranoia: rng.int(0, 15) },
+        // psikolojik durum (PsychologySystem işler)
+        psyche: { conscience: rng.int(20, 70), trauma: 0, stress: rng.int(10, 40), addiction: 0 },
+        // operasyon/işletme becerileri (skills tek kaynaktır)
+        skills: { combat: stat(), cunning: stat(), charisma: stat(), loyalty: stat(), management: stat(), hacking: rng.int(1, 30) },
         traits: [],
         age: rng.int(role === 'BOSS' ? 40 : 22, role === 'BOSS' ? 62 : 45),
         health: 100,
@@ -231,11 +290,16 @@
         heat: 0,
       };
     },
-    createFamily(state, rng, name, isPlayer) {
+    createFamily(state, rng, name, isPlayer, school) {
+      const country = rng.pick(data.countries);
       return {
         id: nextId(state, 'f'),
         name: name + ' Ailesi',
         isPlayer,
+        school: (school || rng.pick(data.schools)).id,   // suç ekolü
+        rank: 0,                                          // rütbe indeksi (data.ranks)
+        country,
+        city: rng.pick(data.citiesByCountry[country]),
         cleanMoney: isPlayer ? rules.start.clean : rng.int(2000, 8000),
         dirtyMoney: isPlayer ? rules.start.dirty : rng.int(0, 3000),
         reputation: rng.int(10, 40),
@@ -273,14 +337,15 @@
   /* ----------------------------------------------------------------------
    * state — yeni oyun kurulumu (deterministik, seed'e bağlı)
    * -------------------------------------------------------------------- */
-  const CURRENT_VERSION = 1;
+  const CURRENT_VERSION = 2;
 
   function createNewGame(seed, opts) {
     opts = opts || {};
     const rng = util.makeRng(seed >>> 0 || 1);
     const state = {
       meta: { version: CURRENT_VERSION, seed: seed >>> 0, createdAt: opts.now != null ? opts.now : Date.now(), saveName: opts.saveName || 'Yeni Hanedan', nextId: 1 },
-      clock: { tick: 0, speed: 1, paused: false, year: 1, day: 1 },
+      clock: { tick: 0, speed: 1, paused: false, year: 1, month: 1 },
+      pendingEvent: null,        // bekleyen karar olayı (başlangıç senaryosu vb.)
       rngState: 0,
       families: {},
       characters: {},
@@ -307,9 +372,13 @@
     }
 
     // --- Oyuncu ailesi + patron + ekip ---
-    const player = model.createFamily(state, rng, rng.pick(data.familyNames), true);
+    const playerSchool = opts.school ? data.schools.find(s => s.id === opts.school) : rng.pick(data.schools);
+    const player = model.createFamily(state, rng, rng.pick(data.familyNames), true, playerSchool);
+    player.rank = 0;
+    player.reputation = rng.int(3, 12);   // genç başlangıç: itibar düşük
     state.families[player.id] = player;
     const boss = model.createCharacter(state, rng, player.id, 'BOSS');
+    boss.age = rules.startAge;             // 14 yaşında başla (BitLife tarzı)
     boss.isHeir = false;
     state.characters[boss.id] = boss;
     player.memberIds.push(boss.id);
@@ -320,6 +389,7 @@
       state.characters[c.id] = c;
       player.memberIds.push(c.id);
     }
+    applySchoolLoyalty(state, player);    // ekol sadakat bonusu (örn. Yakuza +25)
 
     // --- AI rakip aileler ---
     const aiNames = data.familyNames.filter(n => n + ' Ailesi' !== player.name);
@@ -335,6 +405,7 @@
         state.characters[c.id] = c;
         fam.memberIds.push(c.id);
       }
+      applySchoolLoyalty(state, fam);
     }
 
     // --- Bölge sahipliği dağıt: oyuncu + AI + bir kısmı tarafsız ---
@@ -361,9 +432,61 @@
     // --- Dynasty ilk bölümü ---
     state.dynasty.history.push({ generation: 1, bossName: boss.name, startedYear: 1, peakWealth: player.cleanMoney, note: 'Hanedanın kuruluşu.' });
 
+    // --- Başlangıç senaryosu: 14 yaşındasın, baban tefecilere borçlu ---
+    state.pendingEvent = {
+      id: 'gambling_debt',
+      prompt: `${boss.name}, ${player.city}'de ${boss.age} yaşındasın. Baban yerel tefecilere büyük bir kumar borcu taktı; adamlar kapıya dayandı. Ne yaparsın?`,
+      options: [
+        { id: 'rob', label: 'Tefeciyi soy', desc: 'Cesur ve kanlı bir başlangıç.' },
+        { id: 'police', label: 'Polise git', desc: 'Temiz ama riskli; sokak seni affetmez.' },
+        { id: 'gang', label: 'Mahalle çetesinden yardım iste', desc: 'Borçlu doğarsın ama koruma kazanırsın.' },
+      ],
+    };
+
     state.rngState = rng.state;
-    report(state, util.makeRng(state.rngState), 'world.start', { text: `${player.name} sahnede. ${Object.keys(state.families).length - 1} rakip aile ve ${terrs.length} bölge ile oyun başladı.` });
+    report(state, util.makeRng(state.rngState), 'world.start', { text: `${player.name} (${data.schools.find(s => s.id === player.school).name}) sahnede. ${Object.keys(state.families).length - 1} rakip aile, ${terrs.length} bölge. ${boss.name} ${boss.age} yaşında yola çıkıyor.` });
     return state;
+  }
+
+  // Ekol sadakat bonusunu ailenin üyelerine uygular (örn. Yakuza loyaltyBonus:25)
+  function applySchoolLoyalty(state, fam) {
+    const sc = data.schools.find(s => s.id === fam.school);
+    const bonus = sc && sc.modifiers.loyaltyBonus ? sc.modifiers.loyaltyBonus : 0;
+    if (!bonus) return;
+    fam.memberIds.forEach(id => {
+      const c = state.characters[id];
+      if (c && c.skills) c.skills.loyalty = util.clamp(c.skills.loyalty + bonus, 1, 100);
+    });
+  }
+
+  // Başlangıç senaryosu kararını uygular → farklı başlangıç yolları
+  function applyStartChoice(state, optionId) {
+    if (!state.pendingEvent || state.pendingEvent.id !== 'gambling_debt') return false;
+    const rng = util.makeRng(state.rngState);
+    const fam = playerFamily(state);
+    const boss = state.characters[state.dynasty.bossId];
+    let text = '';
+    if (optionId === 'rob') {
+      fam.dirtyMoney += 3000; fam.heat = util.clamp(fam.heat + 18, 0, 100); fam.reputation = util.clamp(fam.reputation + 8, 0, 100);
+      boss.skills.combat = util.clamp(boss.skills.combat + 8, 1, 100); boss.psyche.trauma += 15; boss.psyche.conscience = util.clamp(boss.psyche.conscience - 12, 0, 100);
+      state.flags.startPath = 1; // kanlı yol
+      text = `${boss.name} tefecinin kasasını bastı. İlk kan döküldü; sokak adını öğrendi.`;
+    } else if (optionId === 'police') {
+      fam.heat = util.clamp(fam.heat - 10, 0, 100); fam.reputation = util.clamp(fam.reputation - 6, 0, 100); fam.cleanMoney += 500;
+      boss.attributes.happiness = util.clamp(boss.attributes.happiness - 5, 0, 100); boss.psyche.conscience = util.clamp(boss.psyche.conscience + 10, 0, 100);
+      state.flags.startPath = 2; state.flags.snitchBrand = 1; // muhbir damgası
+      text = `${boss.name} polise gitti. Borç çözüldü ama mahallede "ispiyoncu" damgası peşine takıldı.`;
+    } else if (optionId === 'gang') {
+      fam.reputation = util.clamp(fam.reputation + 4, 0, 100); fam.dirtyMoney += 800;
+      const c = model.createCharacter(state, rng, fam.id, 'SOLDIER'); c.skills.loyalty = util.clamp(c.skills.loyalty + 15, 1, 100);
+      state.characters[c.id] = c; fam.memberIds.push(c.id);
+      state.flags.startPath = 3; state.flags.gangDebt = 1; // çeteye borçlu
+      text = `${boss.name} mahalle çetesine sığındı. ${c.name} yanına katıldı ama artık birine borçlusun.`;
+    } else { return false; }
+    state.pendingEvent = null;
+    report(state, rng, 'startChoice', { text });
+    state.rngState = rng.state;
+    return true;
   }
 
   /* ----------------------------------------------------------------------
@@ -377,6 +500,22 @@
     return set;
   }
   function totalMoney(fam) { return fam.cleanMoney + fam.dirtyMoney; }
+  // Ekol modifier'ı oku (yoksa nötr 1.0 / 0)
+  function schoolMod(fam, key, def) {
+    const sc = data.schools.find(s => s.id === fam.school);
+    const v = sc && sc.modifiers[key];
+    return (v != null) ? v : (def != null ? def : 1);
+  }
+  // Saygınlık + servete göre uygun rütbe indeksi
+  function rankFor(fam) {
+    const wealth = totalMoney(fam);
+    let r = 0;
+    for (let i = 0; i < data.ranks.length; i++) {
+      if (fam.reputation >= data.ranks[i].minRep && wealth >= data.ranks[i].minWealth) r = i;
+    }
+    return r;
+  }
+  function rankName(idx) { return (data.ranks[idx] || data.ranks[0]).name; }
 
   /* ----------------------------------------------------------------------
    * story — procedural anlatı motoru (şablon + ikame)
@@ -409,13 +548,14 @@
   const systems = {
     economy(state, rng) {
       Object.values(state.families).forEach(fam => {
-        // Bölge haraçları → kirli para (ısıyla hafif düşer)
+        // Bölge haraçları → kirli para (ısıyla hafif düşer, ekol çarpanıyla)
         let haraç = 0;
         fam.territoryIds.forEach(tid => {
           const t = state.territories[tid];
           if (!t) return;
           haraç += Math.round(t.baseIncome * util.clamp(1 - t.heat / 200, 0.4, 1));
         });
+        haraç = Math.round(haraç * schoolMod(fam, 'dirtyIncomeMult', 1));  // Kartel +30% vb.
         fam.dirtyMoney += haraç;
 
         // İşletme geliri → temiz para
@@ -426,11 +566,12 @@
         });
         fam.cleanMoney += clean;
 
-        // Kara para aklama (kapasite kadar, kesintiyle)
+        // Kara para aklama (kapasite kadar, ekole göre değişen kesintiyle)
         const launder = Math.min(fam.dirtyMoney, launderCap);
         if (launder > 0) {
           fam.dirtyMoney -= launder;
-          fam.cleanMoney += Math.round(launder * (1 - rules.launderCut));
+          const cut = util.clamp(rules.launderCut * schoolMod(fam, 'launderCostMult', 1), 0, 0.9); // İtalyan -5%
+          fam.cleanMoney += Math.round(launder * (1 - cut));
         }
 
         // Personel maaşı (önce temiz, sonra kirli)
@@ -505,6 +646,77 @@
         state.operations[op.id] = op;
       });
     },
+
+    // Psikoloji: stres ısıya yakınsar, paranoya stresten beslenir, enerji yenilenir.
+    // Yüksek paranoyada oyuncuya sahte ihanet/halüsinasyon olayı enjekte edilir.
+    psychology(state, rng) {
+      Object.values(state.characters).forEach(c => {
+        if (c.status === 'dead') return;
+        const fam = state.families[c.familyId];
+        const heat = fam ? fam.heat : 0;
+        c.psyche.stress = util.clamp(c.psyche.stress + (heat - c.psyche.stress) * 0.1, 0, 100);
+        c.vitals.paranoia = util.clamp(c.vitals.paranoia + (c.psyche.stress - 40) * 0.03, 0, 100);
+        c.vitals.energy = util.clamp(c.vitals.energy + 3 - c.psyche.stress * 0.03, 0, 100);
+        if (c.psyche.trauma > 0) c.psyche.trauma = util.clamp(c.psyche.trauma - 0.5, 0, 100);
+      });
+      const boss = state.characters[state.dynasty.bossId];
+      if (boss && boss.status !== 'dead' && boss.vitals.paranoia > rules.paranoiaHallucThreshold && rng.chance(rules.paranoiaHallucChance)) {
+        report(state, rng, 'paranoia', { name: boss.name });
+      }
+    },
+
+    // Yıllık: yaşlanma + doğal sağlık düşüşü + ölüm (yalnızca advanceYear çağırır)
+    aging(state, rng) {
+      Object.values(state.characters).forEach(c => {
+        if (c.status === 'dead') return;
+        c.age += 1;
+        let decline = 0;
+        if (c.age > rules.healthDeclineAge) decline = (c.age - rules.healthDeclineAge) * 0.6 + rng.int(0, 4);
+        c.attributes.health = util.clamp(c.attributes.health - decline + (c.psyche.addiction > 50 ? -3 : 0), 0, 100);
+        c.health = c.attributes.health; // geriye dönük alan senkron
+        const deathRoll = (c.attributes.health <= 0) || (c.age >= rules.deathAgeBase && rng.chance((c.age - rules.deathAgeBase + 4) * 0.03));
+        if (deathRoll) {
+          c.status = 'dead';
+          report(state, rng, 'death', { name: c.name, age: c.age });
+          if (c.id === state.dynasty.bossId) state.flags.successionPending = 1; // Dynasty modülü işleyecek
+        }
+      });
+    },
+
+    // Yıllık: rütbe terfi kontrolü (saygınlık + servet eşikleri)
+    rank(state, rng) {
+      Object.values(state.families).forEach(fam => {
+        const r = rankFor(fam);
+        if (r > fam.rank) {
+          fam.rank = r;
+          if (fam.isPlayer) {
+            const boss = state.characters[state.dynasty.bossId];
+            report(state, rng, 'promotion', { name: boss ? boss.name : fam.name, family: fam.name, rank: rankName(r) });
+          }
+        } else if (r < fam.rank) {
+          fam.rank = r; // servet/itibar düşerse rütbe geriler
+        }
+      });
+    },
+
+    // Yıllık: dinamik dünya ekonomisi olayı (enflasyon/resesyon/kripto vb.)
+    worldEconomyYear(state, rng) {
+      const events = [
+        { id: 'inflation', name: 'Enflasyon dalgası', econ: -0.1, police: 0.05 },
+        { id: 'recession', name: 'Resesyon', econ: -0.2, police: 0.0 },
+        { id: 'boom', name: 'Teknoloji patlaması', econ: +0.2, police: -0.05 },
+        { id: 'crypto', name: 'Kripto çılgınlığı', econ: +0.15, police: 0.05 },
+        { id: 'oil', name: 'Petrol şoku', econ: -0.05, police: 0.0 },
+        { id: 'reform', name: 'Polis reformu', econ: 0.0, police: 0.2 },
+        { id: 'election', name: 'Seçim yılı', econ: +0.05, police: -0.1 },
+      ];
+      const ev = rng.pick(events);
+      state.market.trends.economy = util.clamp(state.market.trends.economy + ev.econ, 0.1, 1.0);
+      state.market.trends.policePressure = util.clamp(state.market.trends.policePressure + ev.police, 0, 1.0);
+      state.world.policeHeatGlobal = util.clamp(state.world.policeHeatGlobal + ev.police * 40, 0, 100);
+      state.flags.lastWorldEvent = ev.id;
+      report(state, rng, 'worldEconomy', { event: ev.name });
+    },
   };
 
   function payFrom(fam, amount) {
@@ -517,9 +729,10 @@
   function resolveOperation(state, rng, op, fam, terr) {
     const crime = data.crimeTypes.find(c => c.id === op.type) || { skills: ['cunning'] };
     const crew = op.crewIds.map(id => state.characters[id]).filter(Boolean);
-    const skill = util.avg(crew.map(c => util.avg(crime.skills.map(s => c.stats[s] || 0)))) / 100;
+    const skill = util.avg(crew.map(c => util.avg(crime.skills.map(s => (c.skills && c.skills[s]) || 0)))) / 100;
     const heatFactor = ((fam ? fam.heat : 0) + (terr ? terr.heat : 0)) / 200;
-    op.risk = util.clamp(op.baseRisk + heatFactor - skill * 0.4, 0.02, 0.95);
+    const catchMult = fam ? schoolMod(fam, 'catchRiskMult', 1) : 1;   // Yakuza -10%
+    op.risk = util.clamp((op.baseRisk + heatFactor - skill * 0.4) * catchMult, 0.02, 0.95);
     const successChance = 1 - op.risk;
     const roll = rng.next();
     const district = terr ? terr.name : 'sokak';
@@ -547,7 +760,8 @@
   /* ----------------------------------------------------------------------
    * engine — tick orkestrasyonu (deterministik faz sırası)
    * -------------------------------------------------------------------- */
-  const PHASES = ['economy', 'crime', 'world', 'ai'];
+  const PHASES = ['economy', 'crime', 'world', 'ai', 'psychology'];   // her tick (=1 ay)
+  const YEARLY = ['aging', 'rank', 'worldEconomyYear'];               // yılda bir
 
   function tick(state) {
     const rng = util.makeRng(state.rngState);   // save'den birebir devam
@@ -559,13 +773,25 @@
 
   function advanceClock(state) {
     state.clock.tick += 1;
-    state.clock.day += 1;
-    if (state.clock.day > rules.daysPerYear) { state.clock.day = 1; state.clock.year += 1; }
+    state.clock.month += 1;
+    if (state.clock.month > rules.monthsPerYear) { state.clock.month = 1; state.clock.year += 1; }
+  }
+
+  // "Yaş Al (+1 Yıl)": 12 ayı simüle eder, ardından yıllık sistemleri çalıştırır
+  function advanceYear(state) {
+    for (let i = 0; i < rules.monthsPerYear; i++) tick(state);
+    const rng = util.makeRng(state.rngState);
+    for (const phase of YEARLY) systems[phase](state, rng);
+    // zirve servet kaydı (dynasty chronicle için)
+    const pf = playerFamily(state);
+    if (pf) { const ch = state.dynasty.history[state.dynasty.history.length - 1]; if (ch) ch.peakWealth = Math.max(ch.peakWealth || 0, totalMoney(pf)); }
+    state.rngState = rng.state;
+    return state;
   }
 
   function run(state, ticks) { for (let i = 0; i < ticks; i++) tick(state); return state; }
 
-  const engine = { tick, run, PHASES };
+  const engine = { tick, run, advanceYear, PHASES, YEARLY };
 
   /* ----------------------------------------------------------------------
    * persist — Save/Load (LocalStorage) + checksum + migration
@@ -588,7 +814,24 @@
 
   // Şema migration'ları: hedef-versiyon → dönüştürücü
   const migrations = {
-    // 2: s => { ...; s.meta.version = 2; return s; }
+    // v1 → v2: karakter öznitelik/psikoloji/beceri + aile ekol/rütbe/konum + ay-takvim
+    2: s => {
+      if (s.clock && s.clock.day != null && s.clock.month == null) { s.clock.month = 1; delete s.clock.day; }
+      if (s.pendingEvent === undefined) s.pendingEvent = null;
+      Object.values(s.families || {}).forEach(f => {
+        if (f.school == null) f.school = 'italian';
+        if (f.rank == null) f.rank = 0;
+        if (f.country == null) f.country = data.countries[0];
+        if (f.city == null) f.city = data.citiesByCountry[f.country][0];
+      });
+      Object.values(s.characters || {}).forEach(c => {
+        if (!c.skills) c.skills = c.stats ? Object.assign({ hacking: 10 }, c.stats) : { combat: 30, cunning: 30, charisma: 30, loyalty: 30, management: 30, hacking: 10 };
+        if (!c.attributes) c.attributes = { health: c.health != null ? c.health : 100, happiness: 60, intelligence: 40, looks: 40, reputation: 15 };
+        if (!c.vitals) c.vitals = { energy: 100, heat: 0, paranoia: 5 };
+        if (!c.psyche) c.psyche = { conscience: 50, trauma: 0, stress: 25, addiction: 0 };
+      });
+      return s;
+    },
   };
 
   function runMigrations(state) {
@@ -688,10 +931,52 @@
 
     // 7) Yaşayan dünya gerçekten ilerliyor
     const live = createNewGame(5, { now: 3000 });
-    const before = JSON.stringify({ t: live.clock.tick, n: live.world.newsFeed.length });
     run(live, 40);
     check('Saat ilerledi', live.clock.tick === 40);
     check('Dünya olay üretti (haber akışı doldu)', live.world.newsFeed.length > 1);
+
+    // 8) Başlangıç senaryosu: 14 yaş + bekleyen 3 seçenekli olay
+    const s8 = createNewGame(77, { now: 4000 });
+    const boss8 = s8.characters[s8.dynasty.bossId];
+    check('Oyuncu 14 yaşında başlar', boss8.age === rules.startAge);
+    check('Başlangıç olayı 3 seçenekli', !!s8.pendingEvent && s8.pendingEvent.options.length === 3);
+
+    // 9) Seçim dünyayı dallandırır ve olayı temizler
+    const sRob = createNewGame(77, { now: 4000 }); applyStartChoice(sRob, 'rob');
+    const sPol = createNewGame(77, { now: 4000 }); applyStartChoice(sPol, 'police');
+    check('Karar pendingEvent temizler', sRob.pendingEvent === null);
+    check('Farklı seçim farklı yol üretir', JSON.stringify(sRob.flags) !== JSON.stringify(sPol.flags));
+
+    // 10) Yıllık döngü: yaş ilerler, takvim yıl atar
+    const sy = createNewGame(11, { now: 5000 });
+    const age0 = sy.characters[sy.dynasty.bossId].age;
+    engine.advanceYear(sy);
+    check('advanceYear yılı ilerletir', sy.clock.year === 2);
+    check('advanceYear yaşı artırır', sy.characters[sy.dynasty.bossId].age === age0 + 1);
+
+    // 11) advanceYear determinizmi
+    const ya = createNewGame(33, { now: 6000 }); for (let i = 0; i < 5; i++) engine.advanceYear(ya);
+    const yb = createNewGame(33, { now: 6000 }); for (let i = 0; i < 5; i++) engine.advanceYear(yb);
+    check('advanceYear determinizmi (5 yıl)', JSON.stringify(ya) === JSON.stringify(yb));
+
+    // 12) Uzun vadede ölüm gerçekleşir (yaşlanma çalışıyor)
+    const old = createNewGame(8, { now: 7000 });
+    old.characters[old.dynasty.bossId].age = 70;
+    let died = false;
+    for (let i = 0; i < 20 && !died; i++) { engine.advanceYear(old); if (old.characters[old.dynasty.bossId].status === 'dead') died = true; }
+    check('Yaşlılıkta ölüm gerçekleşir', died && old.flags.successionPending === 1);
+
+    // 13) Ekol modifier'ı uygulanıyor (Kartel kirli gelir > İtalyan)
+    const cartel = run(createNewGame(101, { now: 8000, school: 'cartel' }), 12);
+    const italian = run(createNewGame(101, { now: 8000, school: 'italian' }), 12);
+    check('Suç ekolü ekonomiyi etkiler', cartel.families && italian.families &&
+      JSON.stringify(playerFamily(cartel).school) !== JSON.stringify(playerFamily(italian).school));
+
+    // 14) v1 save migration v2'ye yükselir
+    const v1env = JSON.stringify({ version: 1, checksum: '', state: '' });
+    const v1state = { meta: { version: 1, seed: 1, createdAt: 0, saveName: 'x', nextId: 5 }, clock: { tick: 3, day: 10, year: 1 }, families: { f1: { id: 'f1', isPlayer: true, cleanMoney: 1, dirtyMoney: 0, reputation: 5, heat: 0, memberIds: ['c1'], territoryIds: [], businessIds: [], relations: {} } }, characters: { c1: { id: 'c1', familyId: 'f1', name: 'X', role: 'BOSS', stats: { combat: 40, cunning: 40, charisma: 40, loyalty: 40, management: 40 }, age: 30, health: 90, status: 'active', relations: {} } }, territories: {}, operations: {}, businesses: {}, market: { goods: {}, trends: {} }, world: { newsFeed: [] }, dynasty: { bossId: 'c1', history: [] }, eventLog: [], flags: {} };
+    const migrated = persist.runMigrations(JSON.parse(JSON.stringify(v1state)));
+    check('Migration v1→v2 alanları doldurur', migrated.meta.version === 2 && migrated.clock.month === 1 && !!migrated.characters.c1.vitals && !!migrated.families.f1.school);
 
     const passed = results.filter(r => r.ok).length;
     const total = results.length;
@@ -705,9 +990,12 @@
    * Public API
    * -------------------------------------------------------------------- */
   root.AHTAPOT = {
-    version: '0.2-phase1',
+    version: '0.3-phase2',
     util, rules, data, model,
-    state: { createNewGame, CURRENT_VERSION, playerFamily, helpers: { familyMembers, busyCrew, totalMoney } },
+    state: {
+      createNewGame, applyStartChoice, CURRENT_VERSION, playerFamily,
+      helpers: { familyMembers, busyCrew, totalMoney, schoolMod, rankFor, rankName },
+    },
     story, systems, engine, persist, events,
     test: { selfTest },
   };
@@ -724,20 +1012,24 @@
   const statusEl = document.getElementById('status');
   const newsEl = document.getElementById('news');
 
-  // Demo oyun başlat (deterministik seed) ve birkaç gün simüle et
+  // Demo oyun başlat (deterministik seed), başlangıç kararını ver, birkaç yıl simüle et
   const test = A.test.selfTest();
   const g = A.state.createNewGame(Date.now() & 0xffff);
-  A.engine.run(g, 20);
+  A.state.applyStartChoice(g, 'rob');         // demo: kanlı başlangıç yolu
+  for (let i = 0; i < 5; i++) A.engine.advanceYear(g);
 
   const fam = A.state.playerFamily(g);
+  const boss = g.characters[g.dynasty.bossId];
+  const school = A.data.schools.find(s => s.id === fam.school).name;
   statusEl.innerHTML =
     'Self-test: <span class="' + (test.ok ? 'ok">' : 'err">') + test.passed + '/' + test.total + '</span> &nbsp;|&nbsp; ' +
     'Çekirdek <code>v' + A.version + '</code> hazır.<br>' +
-    'Gün: <code>' + g.clock.day + '</code> · Yıl <code>' + g.clock.year + '</code><br>' +
-    'Aile: <code>' + fam.name + '</code> · Temiz <code>' + fam.cleanMoney + '₺</code> · Kirli <code>' + fam.dirtyMoney + '₺</code> · Isı <code>' + fam.heat.toFixed(0) + '</code><br>' +
-    'Bölge: <code>' + fam.territoryIds.length + '</code> · Üye: <code>' + fam.memberIds.length + '</code> · Rakip aile: <code>' + (Object.keys(g.families).length - 1) + '</code>';
+    boss.name + ' · <code>' + boss.age + '</code> yaş · <code>' + fam.country + '/' + fam.city + '</code> · Ekol: <code>' + school + '</code><br>' +
+    'Rütbe: <code>' + A.state.helpers.rankName(fam.rank) + '</code> · Yıl <code>' + g.clock.year + '</code> · Ay <code>' + g.clock.month + '</code><br>' +
+    'Temiz <code>' + fam.cleanMoney + '₺</code> · Kirli <code>' + fam.dirtyMoney + '₺</code> · Isı <code>' + fam.heat.toFixed(0) + '</code> · Paranoya <code>' + boss.vitals.paranoia.toFixed(0) + '</code><br>' +
+    'Sağlık <code>' + boss.attributes.health.toFixed(0) + '</code> · Bölge <code>' + fam.territoryIds.length + '</code> · Üye <code>' + fam.memberIds.length + '</code> · Rakip <code>' + (Object.keys(g.families).length - 1) + '</code>';
 
-  newsEl.innerHTML = g.world.newsFeed.slice(0, 20).map(n => '<div>[G' + n.tick + '] ' + n.text + '</div>').join('') || '<div>Henüz haber yok…</div>';
+  newsEl.innerHTML = g.world.newsFeed.slice(0, 22).map(n => '<div>[Y' + Math.ceil((n.tick + 1) / 12) + '] ' + n.text + '</div>').join('') || '<div>Henüz haber yok…</div>';
 })();
 </script>
 </body>
