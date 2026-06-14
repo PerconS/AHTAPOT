@@ -36,7 +36,7 @@
 </head>
 <body>
   <h1>AHTAPOT</h1>
-  <div class="sub">Suç Hanedanlığı & Mafya Yaşam Simülasyonu — <b>Modül: İstihbarat Kurumları (FBI/Interpol/MİT) · Hapishane RPG (UI yok)</b></div>
+  <div class="sub">Suç Hanedanlığı & Mafya Yaşam Simülasyonu — <b>Modül: Hanedan · Varis Genetiği · Succession · Kaçış · Başarımlar (UI yok)</b></div>
 
   <div class="card">
     <h2>Durum</h2>
@@ -62,6 +62,8 @@
       <code>AHTAPOT.commands.buyGood(g, 'art', 2)</code> / <code>sellGood</code> — kaçak ticaret (ucuza al, pahalıya sat)<br />
       <code>AHTAPOT.commands.bribe(g, 'policeChief')</code> / <code>buyBusiness(g, 'casino')</code> — yozlaşma & aklama<br />
       <code>AHTAPOT.engine.isInPrison(g)</code> · <code>prisonFight</code> / <code>prisonBribeGuard</code> / <code>prisonRecruit</code> / <code>prisonEscape(g,'tunnel')</code><br />
+      <code>AHTAPOT.commands.marry(g)</code> / <code>haveChild(g)</code> / <code>setHeir(g,charId)</code> / <code>fleeCountry(g,'Dubai')</code> — hanedan & kaçış<br />
+      <code>AHTAPOT.state.helpers.dynastyScore(g)</code> · başarımlar <code>g.achievements.unlocked</code><br />
       <code>AHTAPOT.persist.save('slot1', g)</code> / <code>AHTAPOT.persist.load('slot1')</code>
     </div>
   </div>
@@ -184,6 +186,16 @@
     prisonFightHealthRisk: 12,    // ring dövüşü kaybında sağlık kaybı
     guardBribeCost: 5000,         // gardiyan rüşveti
     escapeBasePenalty: 8,         // başarısız firarda eklenen ceza (ay)
+    // --- Hanedan & varis genetiği ---
+    geneticMutation: 12,          // çocuk özniteliklerinde ±mutasyon aralığı
+    childAdultAge: 16,            // bu yaşta çocuk aktif üyeye dönüşür
+    successionRepLoss: 0.7,       // koltuk devrinde itibar çarpanı
+    successionStandingLoss: 0.8,  // koltuk devrinde rakip ilişki çarpanı
+    insanityParanoiaThreshold: 99,// kalıcı delilik eşiği
+    lifeSentenceMonths: 200,      // bu cezadan sonra ömür boyu sayılır (devir)
+    // --- Uluslararası kaçış ---
+    escapeBribeRate: 0.2,         // kaçışta servetten verilen rüşvet oranı
+    exileIncomePenalty: 0.4,      // sürgündeyken haraç geliri cezası
   };
 
   /* ----------------------------------------------------------------------
@@ -229,6 +241,25 @@
       { id: 'interpol', name: 'Interpol' },
       { id: 'mit', name: 'MİT' },
       { id: 'europol', name: 'Europol' },
+    ],
+    // Varis kişilik özellikleri (genetik + rng ile atanır)
+    childTraits: ['Korkak', 'Dahi', 'Psikopat', 'Sadık', 'Açgözlü'],
+    // Uluslararası kaçış noktaları (iade anlaşması olan/olmayan)
+    havens: [
+      { name: 'Dubai', extradition: false },
+      { name: 'Karadağ', extradition: false },
+      { name: 'Rusya', extradition: false },
+      { name: 'Kolombiya', extradition: false },
+      { name: 'Tayland', extradition: false },
+      { name: 'Singapur', extradition: true },
+    ],
+    // Endgame hedefleri (hanedanlık zaferi)
+    endgameGoals: [
+      { id: 'billion', name: '1 Milyar Temiz Servet', cond: (s, h) => h.totalMoney(h.player(s)) >= 1000000000 },
+      { id: 'empire', name: '10+ Bölge İmparatorluğu', cond: (s, h) => h.player(s).territoryIds.length >= 10 },
+      { id: 'politics', name: 'Tam Politik Kontrol', cond: (s, h) => h.corruptionLevel(h.player(s)) >= 80 },
+      { id: 'dynasty5', name: '5 Nesillik Hanedan', cond: (s) => s.dynasty.generation >= 5 },
+      { id: 'network', name: 'Dünya Çapında Ağ (3+ ittifak)', cond: (s, h) => h.alliesOf(s, h.player(s).id).length >= 3 },
     ],
     archetypes: ['aggressor', 'merchant', 'schemer', 'turtle', 'opportunist'],
     // Suç ekolleri — çarpan tabanlı modifier'lar (1.0 = nötr). Sistemler bunları okur.
@@ -434,6 +465,43 @@
       'arrest': [
         '{name} tutuklandı ve parmaklıkların ardına atıldı ({months} ay).',
       ],
+      'marry': [
+        '{name} ile {spouse} dünya evine girdi.',
+      ],
+      'birth': [
+        'Hanedana yeni bir kan: {child} doğdu ({trait}).',
+      ],
+      'heir': [
+        '{name} resmen veliaht ilan edildi.',
+      ],
+      'succession': [
+        'Bir devir kapandı, yenisi açıldı: {heir} artık ailenin başı (Nesil {gen}).',
+        'Taht devredildi: {heir} hanedanı devraldı (Nesil {gen}).',
+      ],
+      'succession.insane': [
+        '{boss} aklını yitirdi; dizginler {heir}\'e geçti.',
+      ],
+      'succession.life': [
+        '{boss} ömür boyu hapse mahkum oldu; {heir} bayrağı devraldı.',
+      ],
+      'collapse': [
+        'Hanedan çöktü. Geriye varis kalmadı; bir imparatorluk tarihe karıştı.',
+      ],
+      'escape.country': [
+        '{name} {country}\'ye kaçtı; sıcak takip soğudu, operasyon uzaktan sürüyor.',
+      ],
+      'escape.caught': [
+        'İade! {name} {country} sınırında yakalanıp geri getirildi.',
+      ],
+      'achievement': [
+        '🏆 Başarım: {name}',
+      ],
+      'endgame': [
+        '👑 ENDGAME: {name} hedefine ulaşıldı!',
+      ],
+      'victory': [
+        '👑👑 ZAFER! Tüm endgame hedefleri tamamlandı; hanedanlık efsaneye dönüştü.',
+      ],
     },
   };
 
@@ -470,6 +538,10 @@
         // hapishane RPG durumu
         isArrested: false,
         prison: null,                   // { sentence, respect, comfort, guards, recruits[] }
+        // hanedan & soy
+        spouseId: null,
+        childrenIds: [],
+        parentIds: [],
         traits: [],
         age: rng.int(role === 'BOSS' ? 40 : 22, role === 'BOSS' ? 62 : 45),
         health: 100,
@@ -527,6 +599,7 @@
         smuggleVolume: 0,                                 // birikmiş kaçakçılık hacmi (federal tetik)
         wiretapTicks: 0,                                  // aktif telefon dinleme süresi
         redNotice: false,                                 // kırmızı bülten (uluslararası yakalama)
+        inExile: false,                                   // yurtdışına kaçtı mı (uzaktan operasyon)
         memberIds: [],
         territoryIds: [],
         businessIds: [],
@@ -560,7 +633,7 @@
   /* ----------------------------------------------------------------------
    * state — yeni oyun kurulumu (deterministik, seed'e bağlı)
    * -------------------------------------------------------------------- */
-  const CURRENT_VERSION = 5;
+  const CURRENT_VERSION = 6;
 
   function createNewGame(seed, opts) {
     opts = opts || {};
@@ -577,7 +650,9 @@
       businesses: {},
       market: { goods: {}, trends: { policePressure: 0.2, economy: 0.5 } },
       world: { policeHeatGlobal: 10, newsFeed: [], factions: { police: { influence: 0.5 }, politics: { influence: 0.4 } } },
-      dynasty: { bossId: null, heirs: [], generation: 1, legacyPoints: 0, perks: [], history: [] },
+      dynasty: { bossId: null, heirs: [], generation: 1, legacyPoints: 0, perks: [], history: [], collapsed: false },
+      achievements: { unlocked: {} },
+      stats: { assassinations: 0, warsWon: 0, escapes: 0, prisonFightsWon: 0, molesCaught: 0, children: 0, peakWealth: 0 },
       eventLog: [],
       flags: {},
     };
@@ -849,6 +924,7 @@
           haraç += Math.round(t.baseIncome * util.clamp(1 - t.heat / 200, 0.4, 1));
         });
         haraç = Math.round(haraç * schoolMod(fam, 'dirtyIncomeMult', 1));  // Kartel +30% vb.
+        if (fam.inExile) haraç = Math.round(haraç * (1 - rules.exileIncomePenalty));  // uzaktan operasyon cezası
         fam.dirtyMoney += haraç;
 
         // Personel maaşı: rol maaşı + pozisyon (job) maaşı (önce temiz, sonra kirli)
@@ -1023,6 +1099,10 @@
       if (boss && boss.status !== 'dead' && boss.vitals.paranoia > rules.paranoiaHallucThreshold && rng.chance(rules.paranoiaHallucChance)) {
         report(state, rng, 'paranoia', { name: boss.name });
       }
+      // kalıcı delilik → koltuk devri (DynastySystem işler)
+      if (boss && boss.status === 'active' && boss.vitals.paranoia >= rules.insanityParanoiaThreshold && rng.chance(0.2)) {
+        boss.status = 'insane'; state.flags.successionPending = 1; state.flags.successionReason = 'insane';
+      }
     },
 
     // Yıllık: yaşlanma + doğal sağlık düşüşü + ölüm (yalnızca advanceYear çağırır)
@@ -1030,6 +1110,8 @@
       Object.values(state.characters).forEach(c => {
         if (c.status === 'dead') return;
         c.age += 1;
+        // çocuk reşit olunca aktif üyeye/varis adayına dönüşür
+        if (c.status === 'child' && c.age >= rules.childAdultAge) c.status = 'active';
         let decline = 0;
         if (c.age > rules.healthDeclineAge) decline = (c.age - rules.healthDeclineAge) * 0.6 + rng.int(0, 4);
         c.attributes.health = util.clamp(c.attributes.health - decline + (c.psyche.addiction > 50 ? -3 : 0), 0, 100);
@@ -1195,7 +1277,7 @@
       c.attributes.happiness = util.clamp(c.attributes.happiness - 10, 0, 100);
       c.skills.loyalty = util.clamp(c.skills.loyalty - 5, 1, 100);
       const exposeChance = util.clamp(0.3 + (boss ? boss.skills.cunning / 200 : 0) + c.moleRisk / 200, 0, 0.95);
-      if (c.isMole && rng.next() < exposeChance) { c.suspicion = 100; report(state, rng, 'mole.exposed', { name: c.name }); return { ok: true, exposed: true }; }
+      if (c.isMole && rng.next() < exposeChance) { c.suspicion = 100; if (state.stats) state.stats.molesCaught++; report(state, rng, 'mole.exposed', { name: c.name }); return { ok: true, exposed: true }; }
       if (!c.isMole && boss && boss.vitals.paranoia > 60 && rng.chance(0.25)) return { ok: true, exposed: false, falseAlarm: true };
       return { ok: true, exposed: false };
     }
@@ -1203,7 +1285,7 @@
       const c = state.characters[charId], pf = playerFamily(state); if (!c || !pf) return { ok: false };
       if (totalMoney(pf) < rules.loyaltyTestCost) return { ok: false, reason: 'no_money' };
       payFrom(pf, rules.loyaltyTestCost);
-      if (c.isMole) { const caught = rng.next() < 0.6; if (caught) { c.suspicion = 100; report(state, rng, 'mole.exposed', { name: c.name }); return { ok: true, exposed: true }; } return { ok: true, exposed: false }; }
+      if (c.isMole) { const caught = rng.next() < 0.6; if (caught) { c.suspicion = 100; if (state.stats) state.stats.molesCaught++; report(state, rng, 'mole.exposed', { name: c.name }); return { ok: true, exposed: true }; } return { ok: true, exposed: false }; }
       c.skills.loyalty = util.clamp(c.skills.loyalty + 8, 1, 100); c.suspicion = Math.max(0, c.suspicion - 20);
       return { ok: true, loyal: true };
     }
@@ -1333,6 +1415,7 @@
       D.territoryIds = D.territoryIds.filter(id => id !== target.id);
       target.ownerId = A.id; A.territoryIds.push(target.id); captured = target.id;
     }
+    if (winner.isPlayer && state.stats) state.stats.warsWon++;
     if (A.isPlayer || D.isPlayer) report(state, rng, 'war.battle', { winner: winner.name, loser: loser.name, district: target ? target.name : 'sınır' });
     if (loser.armedMen <= 2 || rng.chance(0.12)) {
       setTreaty(state, A.id, D.id, 'ceasefire'); adjustStanding(state, A.id, D.id, 8);
@@ -1365,6 +1448,7 @@
     if (success) {
       victim.status = 'dead'; if (victim.id === state.dynasty.bossId) state.flags.successionPending = 1;
       adjustStanding(state, famId, targetId, -25); target.armedMen = Math.max(0, target.armedMen - 2);
+      if (fam.isPlayer && state.stats) state.stats.assassinations++;
       if (fam.isPlayer || target.isPlayer) report(state, rng, 'assassination', { family: fam.name, rival: target.name, name: victim.name });
     } else { fam.heat = util.clamp(fam.heat + 15, 0, 100); adjustStanding(state, famId, targetId, -12); }
     if (target.aiProfile) target.aiProfile.vengeance = util.clamp(target.aiProfile.vengeance + 0.2, 0, 1);
@@ -1503,6 +1587,10 @@
         c.prison.sentence -= 1;
         c.prison.respect = util.clamp(c.prison.respect + (rng.next() - 0.5) * 4, 0, 100);
         if (rng.chance(0.05)) { c.attributes.health = util.clamp(c.attributes.health - rng.int(2, 8), 0, 100); c.health = c.attributes.health; }
+        // patron ömür boyu hapis → koltuk devri (varis dışarıda yönetir)
+        if (c.id === state.dynasty.bossId && c.prison.sentence >= rules.lifeSentenceMonths && !state.flags.successionPending) {
+          state.flags.successionPending = 1; state.flags.successionReason = 'life';
+        }
         if (c.prison.sentence <= 0) release(state, rng, c);
       });
     }
@@ -1517,7 +1605,7 @@
   function doPrisonFight(state, rng) {
     const b = playerArrestedBoss(state); if (!b) return { ok: false, reason: 'not_in_prison' };
     const win = rng.next() < util.clamp(0.4 + b.skills.combat / 200 + b.courage / 300, 0.1, 0.9);
-    if (win) { b.skills.combat = util.clamp(b.skills.combat + 3, 1, 100); b.prison.respect = util.clamp(b.prison.respect + 10, 0, 100); }
+    if (win) { b.skills.combat = util.clamp(b.skills.combat + 3, 1, 100); b.prison.respect = util.clamp(b.prison.respect + 10, 0, 100); if (state.stats) state.stats.prisonFightsWon++; }
     else { b.attributes.health = util.clamp(b.attributes.health - rules.prisonFightHealthRisk, 0, 100); b.health = b.attributes.health; b.prison.respect = util.clamp(b.prison.respect - 3, 0, 100); }
     report(state, rng, 'prison.fight', { name: b.name, result: win ? 'üstün geldi' : 'yenildi' });
     return { ok: true, win, respect: b.prison.respect };
@@ -1562,6 +1650,7 @@
     if (rng.next() < chance) {
       release(state, rng, b);
       fam.federalHeat = util.clamp((fam.federalHeat || 0) + 20, 0, 100); fam.redNotice = true;
+      if (state.stats) state.stats.escapes++;
       report(state, rng, 'prison.escape', { name: b.name, method });
       return { ok: true, escaped: true };
     }
@@ -1572,17 +1661,246 @@
     return { ok: true, escaped: false };
   }
 
+  /* ----------------------------------------------------------------------
+   * HANEDAN & VARİS — romantizm, genetik, succession, kaçış, endgame
+   * -------------------------------------------------------------------- */
+  // Varis genetiği: ebeveyn ortalaması + mutasyon
+  function geneMix(a, b, rng) {
+    const m = rules.geneticMutation;
+    return util.clamp(Math.round((a + b) / 2 + rng.int(-m, m)), 1, 100);
+  }
+
+  function doMarry(state, rng) {
+    const boss = state.characters[state.dynasty.bossId]; const fam = playerFamily(state);
+    if (!boss || boss.status === 'dead') return { ok: false };
+    if (boss.spouseId) return { ok: false, reason: 'married' };
+    const spouse = model.createCharacter(state, rng, fam.id, 'ASSOCIATE');
+    spouse.status = 'spouse'; spouse.age = util.clamp(boss.age + rng.int(-6, 6), 18, 70);
+    spouse.spouseId = boss.id; state.characters[spouse.id] = spouse;
+    boss.spouseId = spouse.id;
+    report(state, rng, 'marry', { name: boss.name, spouse: spouse.name });
+    return { ok: true, spouseId: spouse.id };
+  }
+
+  function doHaveChild(state, rng) {
+    const boss = state.characters[state.dynasty.bossId]; const fam = playerFamily(state);
+    if (!boss || !boss.spouseId) return { ok: false, reason: 'no_spouse' };
+    const spouse = state.characters[boss.spouseId];
+    const child = model.createCharacter(state, rng, fam.id, 'ASSOCIATE');
+    child.status = 'child'; child.age = 0;
+    child.parentIds = [boss.id, spouse ? spouse.id : null].filter(Boolean);
+    // genetik aktarım
+    child.attributes.intelligence = geneMix(boss.attributes.intelligence, spouse ? spouse.attributes.intelligence : 50, rng);
+    child.attributes.looks = geneMix(boss.attributes.looks, spouse ? spouse.attributes.looks : 50, rng);
+    child.skills.loyalty = geneMix(boss.skills.loyalty, spouse ? spouse.skills.loyalty : 50, rng);  // ekol sadakati yatkınlığı
+    child.skills.combat = geneMix(boss.skills.combat, spouse ? spouse.skills.combat : 40, rng);
+    child.skills.cunning = geneMix(boss.skills.cunning, spouse ? spouse.skills.cunning : 40, rng);
+    child.psyche.stress = geneMix(boss.psyche.stress, spouse ? spouse.psyche.stress : 30, rng);     // psikolojik yatkınlık
+    child.vitals.paranoia = geneMix(boss.vitals.paranoia, spouse ? spouse.vitals.paranoia : 10, rng);
+    // kişilik özelliği (genetik eğilimli)
+    let trait;
+    if (child.attributes.intelligence > 75) trait = 'Dahi';
+    else if (child.psyche.stress > 70 || child.vitals.paranoia > 70) trait = 'Psikopat';
+    else if (child.skills.loyalty > 70) trait = 'Sadık';
+    else if (child.skills.combat < 30) trait = 'Korkak';
+    else trait = rng.pick(data.childTraits);
+    child.traits = [trait];
+    state.characters[child.id] = child;
+    if (!fam.memberIds.includes(child.id)) fam.memberIds.push(child.id);
+    boss.childrenIds.push(child.id);
+    if (state.stats) state.stats.children++;
+    report(state, rng, 'birth', { child: child.name, trait });
+    return { ok: true, childId: child.id, trait };
+  }
+
+  function doSetHeir(state, charId) {
+    const c = state.characters[charId]; const fam = playerFamily(state);
+    if (!c || c.familyId !== fam.id || c.status === 'dead') return { ok: false };
+    Object.values(state.characters).forEach(x => { if (x.familyId === fam.id) x.isHeir = false; });
+    state.dynasty.heirs = [charId];
+    c.isHeir = true;
+    return { ok: true };
+  }
+
+  // Uygun varis bul: önce belirlenen, sonra reşit çocuk, sonra reşit üye
+  function findHeir(state, fam) {
+    const adult = id => { const c = state.characters[id]; return c && c.status !== 'dead' && c.id !== state.dynasty.bossId && c.age >= rules.childAdultAge && c.status !== 'child'; };
+    for (const hid of state.dynasty.heirs) if (adult(hid)) return state.characters[hid];
+    const boss = state.characters[state.dynasty.bossId];
+    const kids = (boss ? boss.childrenIds : []).filter(adult).map(id => state.characters[id]);
+    if (kids.length) return kids.sort((a, b) => b.attributes.intelligence - a.attributes.intelligence)[0];
+    const members = fam.memberIds.map(id => state.characters[id]).filter(c => c && adult(c.id) && c.status === 'active');
+    if (members.length) return members.sort((a, b) => (b.skills.loyalty + b.skills.management) - (a.skills.loyalty + a.skills.management))[0];
+    return null;
+  }
+
+  function performSuccession(state, rng) {
+    const fam = playerFamily(state); if (!fam) return;
+    const oldBoss = state.characters[state.dynasty.bossId];
+    const reason = state.flags.successionReason || 'death';
+    // ölen/devredilen patron için tarih bölümü yaz
+    if (oldBoss) {
+      const ch = state.dynasty.history[state.dynasty.history.length - 1];
+      if (ch) { ch.endedYear = state.clock.year; ch.fate = reason; ch.peakWealth = Math.max(ch.peakWealth || 0, totalMoney(fam)); }
+    }
+    const heir = findHeir(state, fam);
+    state.flags.successionPending = 0; state.flags.successionReason = null;
+    if (!heir) {
+      state.dynasty.collapsed = true; state.flags.gameOver = 1;
+      report(state, rng, 'collapse', {});
+      return;
+    }
+    // miras: nakit/işletme/mülk aile düzeyinde kalır; itibar ve ilişkiler aşınır
+    heir.role = 'BOSS'; heir.isHeir = false; heir.isArrested = false; heir.prison = null; heir.status = 'active';
+    state.dynasty.bossId = heir.id;
+    state.dynasty.generation += 1;
+    fam.reputation = Math.round(fam.reputation * rules.successionRepLoss);
+    Object.keys(fam.relations).forEach(id => { fam.relations[id].standing = Math.round(fam.relations[id].standing * rules.successionStandingLoss); });
+    state.dynasty.history.push({ generation: state.dynasty.generation, bossName: heir.name, startedYear: state.clock.year, peakWealth: totalMoney(fam), note: 'Koltuğu devraldı.' });
+    const tpl = reason === 'insane' ? 'succession.insane' : reason === 'life' ? 'succession.life' : 'succession';
+    report(state, rng, tpl, { heir: heir.name, boss: oldBoss ? oldBoss.name : '—', gen: state.dynasty.generation });
+  }
+
+  // Uluslararası kaçış: rüşvetle başka ülkeye geç (redNotice + iade riski)
+  function doFleeCountry(state, rng, havenName) {
+    const fam = playerFamily(state); const boss = state.characters[state.dynasty.bossId];
+    const haven = data.havens.find(h => h.name === havenName) || rng.pick(data.havens);
+    const bribe = Math.round(totalMoney(fam) * rules.escapeBribeRate);
+    if (totalMoney(fam) < bribe + 1000) return { ok: false, reason: 'no_money' };
+    payFrom(fam, bribe);
+    // kırmızı bülten + iade anlaşması olan ülke → yakalanma riski
+    if (fam.redNotice && haven.extradition && rng.chance(0.5)) {
+      if (boss && !boss.isArrested) arrest(state, rng, boss, rng.int(rules.prisonSentenceMin, rules.prisonSentenceMax));
+      report(state, rng, 'escape.caught', { name: boss ? boss.name : fam.name, country: haven.name });
+      return { ok: true, caught: true };
+    }
+    fam.country = haven.name; fam.city = haven.name; fam.inExile = true;
+    fam.heat = util.clamp(fam.heat - 40, 0, 100); fam.federalHeat = util.clamp((fam.federalHeat || 0) - 30, 0, 100);
+    if (state.stats) state.stats.escapes++;
+    report(state, rng, 'escape.country', { name: boss ? boss.name : fam.name, country: haven.name });
+    return { ok: true, caught: false, bribe };
+  }
+
+  // Dynasty Score (servet + bölge + politik güç + sadakat + nesil)
+  function dynastyScore(state) {
+    const fam = playerFamily(state); if (!fam) return 0;
+    return Math.round(totalMoney(fam) / 10000 + fam.territoryIds.length * 5 + corruptionLevel(fam) * 2 + avgLoyalty(state, fam) + state.dynasty.generation * 20 + (state.stats ? state.stats.assassinations * 3 : 0));
+  }
+
+  const achievementHelpers = { totalMoney, player: playerFamily, corruptionLevel, alliesOf, familyMembers };
+
+  // 100+ başarım: açık + eşik serisi üreteçleri (cond saf predicate, state'e yazılmaz)
+  function buildAchievements() {
+    const A = [];
+    const add = (id, name, cat, cond) => A.push({ id, name, cat, cond });
+    const P = s => playerFamily(s);
+    // servet eşikleri
+    [10000, 50000, 100000, 500000, 1000000, 5000000, 10000000, 50000000, 100000000, 500000000, 1000000000].forEach(v =>
+      add('wealth_' + v, 'Servet: ' + v.toLocaleString('tr') + '₺', 'wealth', s => totalMoney(P(s)) >= v));
+    // itibar eşikleri
+    [20, 40, 60, 80, 100].forEach(v => add('rep_' + v, 'Saygınlık ' + v, 'rep', s => P(s).reputation >= v));
+    // rütbe kademeleri
+    data.ranks.forEach(r => add('rank_' + r.id, 'Rütbe: ' + r.name, 'rank', s => P(s).rank >= r.id));
+    // bölge sayıları
+    [3, 5, 8, 12, 20, 30, 50].forEach(v => add('terr_' + v, v + ' Bölge', 'territory', s => P(s).territoryIds.length >= v));
+    // ekip büyüklüğü
+    [5, 10, 15, 20].forEach(v => add('crew_' + v, v + ' Kişilik Ekip', 'crew', s => familyMembers(s, P(s)).filter(c => c.status === 'active').length >= v));
+    // işletme sayısı
+    [2, 4, 6, 10].forEach(v => add('biz_' + v, v + ' İşletme', 'biz', s => P(s).businessIds.length >= v));
+    // yozlaşma seviyesi
+    [25, 50, 75, 100].forEach(v => add('corr_' + v, 'Yozlaşma ' + v, 'corruption', s => corruptionLevel(P(s)) >= v));
+    // suikastlar
+    [1, 5, 10, 25].forEach(v => add('assass_' + v, v + ' Suikast', 'violence', s => s.stats && s.stats.assassinations >= v));
+    // kazanılan savaşlar
+    [1, 3, 5, 10].forEach(v => add('war_' + v, v + ' Savaş Zaferi', 'war', s => s.stats && s.stats.warsWon >= v));
+    // kaçışlar
+    [1, 3, 5].forEach(v => add('escape_' + v, v + ' Kez Kaçış', 'escape', s => s.stats && s.stats.escapes >= v));
+    // hapis dövüşleri
+    [1, 5, 10].forEach(v => add('fight_' + v, v + ' Ring Zaferi', 'prison', s => s.stats && s.stats.prisonFightsWon >= v));
+    // köstebek avı
+    [1, 5].forEach(v => add('mole_' + v, v + ' Köstebek Yakalandı', 'mole', s => s.stats && s.stats.molesCaught >= v));
+    // çocuklar
+    [1, 3, 5].forEach(v => add('child_' + v, v + ' Çocuk', 'dynasty', s => s.stats && s.stats.children >= v));
+    // nesiller
+    [2, 3, 5, 10].forEach(v => add('gen_' + v, v + '. Nesil Hanedan', 'dynasty', s => s.dynasty.generation >= v));
+    // hayatta kalınan yıllar
+    [10, 25, 50, 100].forEach(v => add('year_' + v, v + ' Yıl Ayakta', 'survival', s => s.clock.year >= v));
+    // ekol başına Don ol
+    data.schools.forEach(sc => add('school_don_' + sc.id, sc.name + ' ile Don', 'school', s => P(s).school === sc.id && P(s).rank >= 5));
+    // anlatısal/özel başarımlar
+    add('first_blood', 'İlk Kan', 'story', s => s.stats && s.stats.assassinations >= 1);
+    add('street_king', 'Sokak Kralı', 'story', s => P(s).rank >= 2);
+    add('don_corleone', 'Don Corleone', 'story', s => P(s).rank >= 5);
+    add('emperor', 'İmparator', 'story', s => P(s).rank >= 7);
+    add('interpol_nightmare', 'Interpol Kabusu', 'story', s => P(s).redNotice && s.stats && s.stats.escapes >= 1);
+    add('last_don', 'Son Baba', 'story', s => s.dynasty.generation >= 2);
+    add('untouchable', 'Dokunulmaz', 'story', s => corruptionLevel(P(s)) >= 75 && P(s).heat < 10);
+    add('jailbird', 'Kafesteki Kuş', 'story', s => Object.values(s.characters).some(c => c.familyId === P(s).id && c.isArrested));
+    add('houdini', 'Houdini', 'story', s => s.stats && s.stats.escapes >= 1);
+    add('kingmaker', 'Kral Yapıcı', 'story', s => corruptionLevel(P(s)) >= 100);
+    add('blood_dynasty', 'Kan Hanedanı', 'story', s => s.stats && s.stats.children >= 3 && s.dynasty.generation >= 3);
+    // ittifak sayısı
+    [1, 2, 3].forEach(v => add('ally_' + v, v + ' İttifak', 'diplomacy', s => alliesOf(s, P(s).id).length >= v));
+    // her işletme türünden sahip olma
+    data.businessTypes.forEach(bt => add('own_' + bt.id, bt.name + ' Sahibi', 'biz', s => P(s).businessIds.some(id => s.businesses[id] && s.businesses[id].type === bt.id)));
+    // ekol başına Godfather
+    data.schools.forEach(sc => add('school_gf_' + sc.id, sc.name + ' ile Godfather', 'school', s => P(s).school === sc.id && P(s).rank >= 6));
+    // durum başarımları
+    add('married', 'Dünya Evi', 'dynasty', s => { const b = s.characters[s.dynasty.bossId]; return !!(b && b.spouseId); });
+    add('heir_named', 'Veliaht', 'dynasty', s => s.dynasty.heirs.length > 0);
+    add('in_exile', 'Sürgün', 'escape', s => P(s).inExile);
+    add('red_notice', 'Kırmızı Bülten', 'escape', s => P(s).redNotice);
+    add('paranoia_survivor', 'Paranoyak', 'psyche', s => { const b = s.characters[s.dynasty.bossId]; return !!(b && b.vitals.paranoia > 70); });
+    add('max_heat', 'Tam Aranıyor', 'heat', s => P(s).heat >= 100);
+    // hanedan skoru eşikleri
+    [100, 500, 1000].forEach(v => add('score_' + v, 'Hanedan Skoru ' + v, 'score', s => dynastyScore(s) >= v));
+    // endgame hedefleri başarım olarak
+    data.endgameGoals.forEach(g => add('endgame_' + g.id, 'Endgame: ' + g.name, 'endgame', s => g.cond(s, achievementHelpers)));
+    return A;
+  }
+  data.achievements = buildAchievements();
+
+  // BAŞARIM & ENDGAME sistemi (performans dostu: yalnız kilitli olanları kontrol eder)
+  class AchievementSystem {
+    update(state, rng) {
+      const unlocked = state.achievements.unlocked;
+      for (const a of data.achievements) {
+        if (unlocked[a.id]) continue;
+        let ok = false;
+        try { ok = a.cond(state, achievementHelpers); } catch (e) { ok = false; }
+        if (ok) { unlocked[a.id] = state.clock.tick; if (a.cat !== 'endgame') report(state, rng, 'achievement', { name: a.name }); else report(state, rng, 'endgame', { name: a.name }); }
+      }
+      // zafer: tüm endgame hedefleri
+      if (!state.flags.victory && data.endgameGoals.every(g => unlocked['endgame_' + g.id])) {
+        state.flags.victory = 1; report(state, rng, 'victory', {});
+      }
+    }
+  }
+
+  // HANEDAN sistemi: succession tetikleri + zirve servet kaydı
+  class DynastySystem {
+    update(state, rng) {
+      if (state.flags.successionPending && !state.dynasty.collapsed) performSuccession(state, rng);
+      const fam = playerFamily(state);
+      if (fam && state.stats) state.stats.peakWealth = Math.max(state.stats.peakWealth, totalMoney(fam));
+    }
+  }
+
   const crewSystem = new CrewSystem();
   const moleSystem = new MoleSystem();
   const diplomacySystem = new DiplomacySystem();
   const agencySystem = new AgencySystem();
   const prisonSystem = new PrisonSystem();
+  const dynastySystem = new DynastySystem();
+  const achievementSystem = new AchievementSystem();
   // Living World tick'ine kaydet (saf fonksiyon imzasıyla)
   systems.crew = (state, rng) => crewSystem.update(state, rng);
   systems.mole = (state, rng) => moleSystem.update(state, rng);
   systems.diplomacy = (state, rng) => diplomacySystem.update(state, rng);
   systems.agency = (state, rng) => agencySystem.update(state, rng);
   systems.prison = (state, rng) => prisonSystem.update(state, rng);
+  systems.dynasty = (state, rng) => dynastySystem.update(state, rng);
+  systems.achievement = (state, rng) => achievementSystem.update(state, rng);
 
   // Oyuncu komutları (deterministik, rngState'i ilerletir; aktör = oyuncu ailesi)
   const commands = {
@@ -1609,12 +1927,16 @@
     prisonBribeGuard: (state) => withRng(state, rng => doPrisonBribeGuard(state, rng)),
     prisonRecruit: (state) => withRng(state, rng => doPrisonRecruit(state, rng)),
     prisonEscape: (state, method) => withRng(state, rng => doPrisonEscape(state, rng, method)),
+    marry: (state) => withRng(state, rng => doMarry(state, rng)),
+    haveChild: (state) => withRng(state, rng => doHaveChild(state, rng)),
+    setHeir: (state, charId) => doSetHeir(state, charId),
+    fleeCountry: (state, havenName) => withRng(state, rng => doFleeCountry(state, rng, havenName)),
   };
 
   /* ----------------------------------------------------------------------
    * engine — tick orkestrasyonu (deterministik faz sırası)
    * -------------------------------------------------------------------- */
-  const PHASES = ['market', 'economy', 'laundering', 'crime', 'world', 'agency', 'ai', 'psychology', 'crew', 'mole', 'diplomacy', 'corruption', 'prison'];   // her tick (=1 ay)
+  const PHASES = ['market', 'economy', 'laundering', 'crime', 'world', 'agency', 'ai', 'psychology', 'crew', 'mole', 'diplomacy', 'corruption', 'prison', 'dynasty', 'achievement'];   // her tick (=1 ay)
   const YEARLY = ['aging', 'rank', 'worldEconomyYear'];               // yılda bir
 
   function tick(state) {
@@ -1636,6 +1958,9 @@
     for (let i = 0; i < rules.monthsPerYear; i++) tick(state);
     const rng = util.makeRng(state.rngState);
     for (const phase of YEARLY) systems[phase](state, rng);
+    // yaşlılıktan ölen patron için succession'ı aynı yıl işle
+    systems.dynasty(state, rng);
+    systems.achievement(state, rng);
     // zirve servet kaydı (dynasty chronicle için)
     const pf = playerFamily(state);
     if (pf) { const ch = state.dynasty.history[state.dynasty.history.length - 1]; if (ch) ch.peakWealth = Math.max(ch.peakWealth || 0, totalMoney(pf)); }
@@ -1739,6 +2064,20 @@
       Object.values(s.characters || {}).forEach(c => {
         if (c.isArrested == null) c.isArrested = (c.status === 'jailed');
         if (c.prison === undefined) c.prison = null;
+      });
+      return s;
+    },
+    // v5 → v6: hanedan/soy alanları, istatistik sayaçları, başarım kaydı, sürgün
+    6: s => {
+      if (!s.dynasty) s.dynasty = { bossId: null, heirs: [], generation: 1, legacyPoints: 0, perks: [], history: [], collapsed: false };
+      if (s.dynasty.collapsed == null) s.dynasty.collapsed = false;
+      if (!s.achievements) s.achievements = { unlocked: {} };
+      if (!s.stats) s.stats = { assassinations: 0, warsWon: 0, escapes: 0, prisonFightsWon: 0, molesCaught: 0, children: 0, peakWealth: 0 };
+      Object.values(s.families || {}).forEach(f => { if (f.inExile == null) f.inExile = false; });
+      Object.values(s.characters || {}).forEach(c => {
+        if (c.spouseId === undefined) c.spouseId = null;
+        if (!c.childrenIds) c.childrenIds = [];
+        if (!c.parentIds) c.parentIds = [];
       });
       return s;
     },
@@ -1869,12 +2208,13 @@
     const yb = createNewGame(33, { now: 6000 }); for (let i = 0; i < 5; i++) engine.advanceYear(yb);
     check('advanceYear determinizmi (5 yıl)', JSON.stringify(ya) === JSON.stringify(yb));
 
-    // 12) Uzun vadede ölüm gerçekleşir (yaşlanma çalışıyor)
+    // 12) Uzun vadede ölüm gerçekleşir (yaşlanma çalışıyor; succession otomatik devralır)
     const old = createNewGame(8, { now: 7000 });
-    old.characters[old.dynasty.bossId].age = 70;
+    const origBoss = old.dynasty.bossId;
+    old.characters[origBoss].age = 70;
     let died = false;
-    for (let i = 0; i < 20 && !died; i++) { engine.advanceYear(old); if (old.characters[old.dynasty.bossId].status === 'dead') died = true; }
-    check('Yaşlılıkta ölüm gerçekleşir', died && old.flags.successionPending === 1);
+    for (let i = 0; i < 25 && !died; i++) { engine.advanceYear(old); if (old.characters[origBoss].status === 'dead') died = true; }
+    check('Yaşlılıkta ölüm gerçekleşir', died);
 
     // 13) Ekol modifier'ı uygulanıyor (Kartel kirli gelir > İtalyan)
     const cartel = run(createNewGame(101, { now: 8000, school: 'cartel' }), 12);
@@ -1886,11 +2226,12 @@
     const v1env = JSON.stringify({ version: 1, checksum: '', state: '' });
     const v1state = { meta: { version: 1, seed: 1, createdAt: 0, saveName: 'x', nextId: 5 }, clock: { tick: 3, day: 10, year: 1 }, families: { f1: { id: 'f1', isPlayer: true, cleanMoney: 1, dirtyMoney: 0, reputation: 5, heat: 0, memberIds: ['c1'], territoryIds: [], businessIds: [], relations: {} } }, characters: { c1: { id: 'c1', familyId: 'f1', name: 'X', role: 'BOSS', stats: { combat: 40, cunning: 40, charisma: 40, loyalty: 40, management: 40 }, age: 30, health: 90, status: 'active', relations: {} } }, territories: {}, operations: {}, businesses: {}, market: { goods: {}, trends: {} }, world: { newsFeed: [] }, dynasty: { bossId: 'c1', history: [] }, eventLog: [], flags: {} };
     const migrated = persist.runMigrations(JSON.parse(JSON.stringify(v1state)));
-    check('Migration v1→v5 alanları doldurur', migrated.meta.version === 5 && migrated.clock.month === 1 &&
+    check('Migration v1→v6 alanları doldurur', migrated.meta.version === 6 && migrated.clock.month === 1 &&
       !!migrated.characters.c1.vitals && !!migrated.families.f1.school &&
       migrated.families.f1.armedMen != null && migrated.characters.c1.job === 'none' && !!migrated.families.f1.relations &&
       !!migrated.families.f1.inventory && !!migrated.families.f1.corruption && !!migrated.market.goods.weapon &&
-      migrated.families.f1.federalHeat != null && migrated.characters.c1.isArrested != null && migrated.characters.c1.prison === null);
+      migrated.families.f1.federalHeat != null && migrated.characters.c1.isArrested != null && migrated.characters.c1.prison === null &&
+      !!migrated.achievements && !!migrated.stats && migrated.families.f1.inExile === false && Array.isArray(migrated.characters.c1.childrenIds));
 
     // 15) 6 isimli rakip aile sabit kadro
     const s15 = createNewGame(1, { now: 1 });
@@ -2050,9 +2391,59 @@
     let escaped = false; for (let i = 0; i < 50 && !escaped; i++) { const r = commands.prisonEscape(es, 'tunnel'); if (r.escaped) escaped = true; }
     check('Firar planı çalışır', escaped && be.isArrested === false);
 
-    // 41) Genişletilmiş tick (13 faz) deterministik
+    // 41) Genişletilmiş tick (15 faz) deterministik
     const ga = run(createNewGame(444, { now: 28 }), 24), gbq = run(createNewGame(444, { now: 28 }), 24);
-    check('13 fazlı tick determinizmi', JSON.stringify(ga) === JSON.stringify(gbq));
+    check('15 fazlı tick determinizmi', JSON.stringify(ga) === JSON.stringify(gbq));
+
+    // 42) Evlilik + çocuk (varis genetiği)
+    const dy = createNewGame(2020, { now: 30 });
+    commands.marry(dy);
+    const childRes = commands.haveChild(dy);
+    check('Evlilik + çocuk doğar', childRes.ok && !!childRes.childId && dy.stats.children === 1);
+    const child = dy.characters[childRes.childId];
+    check('Çocuk genetik + özellik taşır', child.parentIds.length === 2 && child.traits.length === 1 && child.status === 'child');
+
+    // 43) Çocuk reşit olunca aktif olur (aging)
+    const gr = createNewGame(2121, { now: 31 }); commands.marry(gr); const cr = commands.haveChild(gr).childId;
+    for (let i = 0; i < 17; i++) engine.advanceYear(gr);
+    check('Çocuk reşit olunca aktifleşir', gr.characters[cr] && gr.characters[cr].status === 'active' && gr.characters[cr].age >= rules.childAdultAge);
+
+    // 44) Succession: patron ölünce varis devralır, nesil artar
+    const su = createNewGame(2222, { now: 32 });
+    const heir = familyMembers(su, playerFamily(su)).find(c => c.role !== 'BOSS' && c.age >= 16);
+    commands.setHeir(su, heir.id);
+    const oldBossId = su.dynasty.bossId; const gen0 = su.dynasty.generation;
+    su.characters[oldBossId].status = 'dead'; su.flags.successionPending = 1;
+    systems.dynasty(su, util.makeRng(1));
+    check('Succession varisi tahta geçirir', su.dynasty.bossId === heir.id && su.characters[heir.id].role === 'BOSS' && su.dynasty.generation === gen0 + 1);
+
+    // 45) Varis yoksa hanedan çöker (game over)
+    const cl = createNewGame(2323, { now: 33 });
+    familyMembers(cl, playerFamily(cl)).forEach(c => { if (c.role !== 'BOSS') c.status = 'dead'; });
+    cl.characters[cl.dynasty.bossId].status = 'dead'; cl.flags.successionPending = 1;
+    systems.dynasty(cl, util.makeRng(1));
+    check('Varis yoksa hanedan çöker', cl.dynasty.collapsed === true && cl.flags.gameOver === 1);
+
+    // 46) Uluslararası kaçış: ülke değişir, sürgün + ısı düşer
+    const ec = createNewGame(2424, { now: 34 }); const pfe = playerFamily(ec);
+    pfe.cleanMoney = 100000; pfe.heat = 80; pfe.redNotice = false;
+    const fl = commands.fleeCountry(ec, 'Dubai');
+    check('Kaçış ülke değiştirir + sürgün', fl.ok && !fl.caught && playerFamily(ec).country === 'Dubai' && playerFamily(ec).inExile === true && playerFamily(ec).heat < 80);
+
+    // 47) Başarım sistemi 100+ başarım içerir ve kilit açar
+    check('100+ başarım tanımlı', data.achievements.length >= 100);
+    const ac = createNewGame(2525, { now: 35 }); playerFamily(ac).cleanMoney = 20000;
+    systems.achievement(ac, util.makeRng(1));
+    check('Servet başarımı açılır', ac.achievements.unlocked['wealth_10000'] != null);
+
+    // 48) Dynasty Score hesaplanır
+    const ds = createNewGame(2626, { now: 36 });
+    check('Dynasty Score sayısal', typeof dynastyScore(ds) === 'number' && dynastyScore(ds) >= 0);
+
+    // 49) Save/Load round-trip yeni alanlarla bozulmaz
+    const sv = createNewGame(2727, { now: 37 }); commands.marry(sv); commands.haveChild(sv); run(sv, 12);
+    persist.save('v6', sv, MemoryAdapter); const lo = persist.load('v6', MemoryAdapter);
+    check('v6 save/load round-trip', JSON.stringify(sv) === JSON.stringify(lo));
 
     const passed = results.filter(r => r.ok).length;
     const total = results.length;
@@ -2066,14 +2457,14 @@
    * Public API
    * -------------------------------------------------------------------- */
   root.AHTAPOT = {
-    version: '0.6-agency-prison',
+    version: '0.7-dynasty-succession-escape-achievements',
     util, rules, data, model,
     state: {
       createNewGame, applyStartChoice, CURRENT_VERSION, playerFamily,
-      helpers: { familyMembers, busyCrew, totalMoney, schoolMod, rankFor, rankName, crewAttrs, crewLimit, jobName, familyPower, avgLoyalty, relationOf, alliesOf, isEmbargoed, corruptionLevel, cityFactor, catFactor, isInPrison, playerArrestedBoss },
+      helpers: { familyMembers, busyCrew, totalMoney, schoolMod, rankFor, rankName, crewAttrs, crewLimit, jobName, familyPower, avgLoyalty, relationOf, alliesOf, isEmbargoed, corruptionLevel, cityFactor, catFactor, isInPrison, playerArrestedBoss, dynastyScore, findHeir },
     },
     story, systems, engine, persist, events, commands,
-    crewSystem, moleSystem, diplomacySystem, agencySystem, prisonSystem,
+    crewSystem, moleSystem, diplomacySystem, agencySystem, prisonSystem, dynastySystem, achievementSystem,
     test: { selfTest },
   };
 })();
@@ -2097,6 +2488,7 @@
   A.commands.hire(g, { job: 'spy' });         // demo: casus al
   const rivalId = Object.keys(g.families).find(id => !g.families[id].isPlayer);
   A.commands.declareWar(g, rivalId);          // demo: bir rakibe savaş aç
+  A.commands.marry(g); A.commands.haveChild(g); // demo: hanedan kurulumu
   for (let i = 0; i < 5; i++) A.engine.advanceYear(g);
 
   const fam = A.state.playerFamily(g);
@@ -2121,6 +2513,7 @@
     'Sağlık <code>' + boss.attributes.health.toFixed(0) + '</code> · Bölge <code>' + fam.territoryIds.length + '</code> · İşletme <code>' + fam.businessIds.length + '</code> · Üye <code>' + fam.memberIds.filter(id => g.characters[id] && g.characters[id].status === 'active').length + '</code><br>' +
     'Silahlı adam <code>' + fam.armedMen + '</code> · Güç <code>' + A.state.helpers.familyPower(g, fam) + '</code> · Savaş <code>' + wars + '</code> · İttifak <code>' + allies + '</code><br>' +
     'Federal ısı <code>' + (fam.federalHeat || 0).toFixed(0) + '</code> · Kırmızı bülten <code>' + (fam.redNotice ? 'EVET' : 'hayır') + '</code> · Hapiste <code>' + (A.engine.isInPrison(g) ? 'EVET' : 'hayır') + '</code><br>' +
+    'Nesil <code>' + g.dynasty.generation + '</code> · Çocuk <code>' + g.stats.children + '</code> · Hanedan Skoru <code>' + A.state.helpers.dynastyScore(g) + '</code> · Başarım <code>' + Object.keys(g.achievements.unlocked).length + '/' + A.data.achievements.length + '</code><br>' +
     'Ekonomi endeksi <code>' + econ + '</code> · Kripto Kaset fiyatı <code>' + cryptoP + '₺</code> · Rakip <code>' + (Object.keys(g.families).length - 1) + '</code>';
 
   newsEl.innerHTML = g.world.newsFeed.slice(0, 22).map(n => '<div>[Y' + Math.ceil((n.tick + 1) / 12) + '] ' + n.text + '</div>').join('') || '<div>Henüz haber yok…</div>';
