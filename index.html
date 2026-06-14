@@ -36,7 +36,7 @@
 </head>
 <body>
   <h1>AHTAPOT</h1>
-  <div class="sub">Suç Hanedanlığı & Mafya Yaşam Simülasyonu — <b>Modül: Dinamik Ekonomi · Kaçak Ticaret · Aklama · Siyasi Yozlaşma (UI yok)</b></div>
+  <div class="sub">Suç Hanedanlığı & Mafya Yaşam Simülasyonu — <b>Modül: İstihbarat Kurumları (FBI/Interpol/MİT) · Hapishane RPG (UI yok)</b></div>
 
   <div class="card">
     <h2>Durum</h2>
@@ -61,6 +61,7 @@
       <code>AHTAPOT.commands.surveil(g, charId)</code> / <code>interrogate</code> / <code>loyaltyTest</code> / <code>silence</code> (köstebek)<br />
       <code>AHTAPOT.commands.buyGood(g, 'art', 2)</code> / <code>sellGood</code> — kaçak ticaret (ucuza al, pahalıya sat)<br />
       <code>AHTAPOT.commands.bribe(g, 'policeChief')</code> / <code>buyBusiness(g, 'casino')</code> — yozlaşma & aklama<br />
+      <code>AHTAPOT.engine.isInPrison(g)</code> · <code>prisonFight</code> / <code>prisonBribeGuard</code> / <code>prisonRecruit</code> / <code>prisonEscape(g,'tunnel')</code><br />
       <code>AHTAPOT.persist.save('slot1', g)</code> / <code>AHTAPOT.persist.load('slot1')</code>
     </div>
   </div>
@@ -169,6 +170,20 @@
     corruptionRaidDivisor: 130,   // baskın şansını bastıran yozlaşma böleni
     leakSeizeReduction: 0.4,      // sızdırılan baskında el konan paranın çarpanı
     courtReleaseDivisor: 250,     // yozlaşmayla hapisten salınma şansı böleni
+    // --- İstihbarat kurumları (federal) ---
+    federalCorruptionTrigger: 50, // bu üstü yozlaşma federal dikkat çeker
+    federalSmuggleDivisor: 60,    // kaçakçılık hacminin federal ısıya katkı böleni
+    federalHeatDecay: 1.5,        // tick başına federal ısı sönümü
+    federalWiretapThreshold: 40,  // telefon dinleme eşiği
+    federalRaidThreshold: 60,     // şafak operasyonu / varlık dondurma eşiği
+    federalBossArrestThreshold: 80, // bu üstünde patron bizzat tutuklanır
+    federalFreezeRate: 0.25,      // dondurulan temiz banka oranı
+    federalWiretapTicks: 6,       // dinleme süresi (ay)
+    // --- Hapishane RPG ---
+    prisonSentenceMin: 6, prisonSentenceMax: 24,  // ceza (ay)
+    prisonFightHealthRisk: 12,    // ring dövüşü kaybında sağlık kaybı
+    guardBribeCost: 5000,         // gardiyan rüşveti
+    escapeBasePenalty: 8,         // başarısız firarda eklenen ceza (ay)
   };
 
   /* ----------------------------------------------------------------------
@@ -207,6 +222,13 @@
       { id: 'policeChief', name: 'Emniyet Müdürü', cost: 100000, corruption: 22, upkeep: 6000 },
       { id: 'judge', name: 'Hakim', cost: 120000, corruption: 25, upkeep: 7000 },
       { id: 'minister', name: 'Bakan', cost: 300000, corruption: 30, upkeep: 15000 },
+    ],
+    // İstihbarat kurumları (federal) — yerel polisi bypass eder
+    agencies: [
+      { id: 'fbi', name: 'FBI' },
+      { id: 'interpol', name: 'Interpol' },
+      { id: 'mit', name: 'MİT' },
+      { id: 'europol', name: 'Europol' },
     ],
     archetypes: ['aggressor', 'merchant', 'schemer', 'turtle', 'opportunist'],
     // Suç ekolleri — çarpan tabanlı modifier'lar (1.0 = nötr). Sistemler bunları okur.
@@ -381,6 +403,37 @@
       'corruption.collapse': [
         '{family} rüşvet ağını besleyemedi; {name} desteğini çekti.',
       ],
+      'agency.wiretap': [
+        '{agency} {family} hatlarını dinlemeye aldı; iletişim kanalları sızdırıyor.',
+      ],
+      'agency.raid': [
+        '{agency} şafak operasyonu! {family} hesaplarında {amount}₺ donduruldu.',
+        '{agency} federal baskını {family} üzerine indi; yerel koruma işe yaramadı.',
+      ],
+      'agency.rednotice': [
+        'Kırmızı bülten: {name} için uluslararası yakalama emri çıktı.',
+      ],
+      'prison.fight': [
+        'Avlu kapışması: {name} ringde {result}.',
+      ],
+      'prison.bribe': [
+        '{name} gardiyanı cebine aldı; hücre konforu arttı, kapılar aralandı.',
+      ],
+      'prison.recruit': [
+        '{name} içeride {recruit} adlı mahkumu devşirdi; çıkınca ekibe katılacak.',
+      ],
+      'prison.escape': [
+        'FİRAR! {name} {method} ile parmaklıkları aştı ve özgür.',
+      ],
+      'prison.escape.fail': [
+        '{name}\'in firar girişimi başarısız oldu; ceza uzadı.',
+      ],
+      'prison.release': [
+        '{name} cezasını tamamladı ve sokağa geri döndü.',
+      ],
+      'arrest': [
+        '{name} tutuklandı ve parmaklıkların ardına atıldı ({months} ay).',
+      ],
     },
   };
 
@@ -414,6 +467,9 @@
         isMole: false,
         moleRisk: 0,                    // arka planda büyür (düşük sadakat + açgözlülük)
         suspicion: 0,                   // oyuncunun bildiği şüphe düzeyi (takip/sorgu açar)
+        // hapishane RPG durumu
+        isArrested: false,
+        prison: null,                   // { sentence, respect, comfort, guards, recruits[] }
         traits: [],
         age: rng.int(role === 'BOSS' ? 40 : 22, role === 'BOSS' ? 62 : 45),
         health: 100,
@@ -467,6 +523,10 @@
         armedMen: isPlayer ? 3 : rng.int(6, 18),          // Silahlı Adam Sayısı
         inventory: {},                                    // kaçak mal stoğu { goodId: adet }
         corruption: { mayor: false, prosecutor: false, policeChief: false, judge: false, minister: false },
+        federalHeat: 0,                                   // Federal Takip Skoru (FBI/Interpol...)
+        smuggleVolume: 0,                                 // birikmiş kaçakçılık hacmi (federal tetik)
+        wiretapTicks: 0,                                  // aktif telefon dinleme süresi
+        redNotice: false,                                 // kırmızı bülten (uluslararası yakalama)
         memberIds: [],
         territoryIds: [],
         businessIds: [],
@@ -500,7 +560,7 @@
   /* ----------------------------------------------------------------------
    * state — yeni oyun kurulumu (deterministik, seed'e bağlı)
    * -------------------------------------------------------------------- */
-  const CURRENT_VERSION = 4;
+  const CURRENT_VERSION = 5;
 
   function createNewGame(seed, opts) {
     opts = opts || {};
@@ -1032,7 +1092,8 @@
     const skill = util.avg(crew.map(c => util.avg(crime.skills.map(s => (c.skills && c.skills[s]) || 0)))) / 100;
     const heatFactor = ((fam ? fam.heat : 0) + (terr ? terr.heat : 0)) / 200;
     const catchMult = fam ? schoolMod(fam, 'catchRiskMult', 1) : 1;   // Yakuza -10%
-    op.risk = util.clamp((op.baseRisk + heatFactor - skill * 0.4) * catchMult, 0.02, 0.95);
+    const wiretap = (fam && fam.wiretapTicks > 0) ? 0.1 : 0;          // dinleme operasyonu riske sokar
+    op.risk = util.clamp((op.baseRisk + heatFactor - skill * 0.4) * catchMult + wiretap, 0.02, 0.95);
     const successChance = 1 - op.risk;
     const roll = rng.next();
     const district = terr ? terr.name : 'sokak';
@@ -1320,6 +1381,7 @@
     if (fam.dirtyMoney < cost) return { ok: false, reason: 'no_money', cost };
     fam.dirtyMoney -= cost;
     fam.inventory[goodId] = (fam.inventory[goodId] || 0) + qty;
+    fam.smuggleVolume = (fam.smuggleVolume || 0) + cost / 1000;   // federal dikkat birikir
     m.demand = util.clamp(m.demand + qty * 0.02, 0.2, 1.8);
     // yakalanma riski
     if (rng.chance(util.clamp(g.risk + fam.heat / 400, 0, 0.6))) {
@@ -1338,6 +1400,7 @@
     const revenue = unit * qty;
     fam.inventory[goodId] = have - qty;
     fam.dirtyMoney += revenue;
+    fam.smuggleVolume = (fam.smuggleVolume || 0) + revenue / 1000;   // federal dikkat birikir
     m.supply = util.clamp(m.supply + qty * 0.02, 0.2, 1.8);
     if (rng.chance(util.clamp(g.risk + fam.heat / 400, 0, 0.6))) {
       fam.heat = util.clamp(fam.heat + rules.tradeBustHeat, 0, 100);
@@ -1368,13 +1431,158 @@
     return { ok: true, businessId: b.id };
   }
 
+  // İSTİHBARAT KURUMLARI — federal takip skoru, dinleme, varlık dondurma, baskın
+  // Yerel polisi/yozlaşmayı bypass eder (Bakan kısmi koruma sağlar).
+  class AgencySystem {
+    update(state, rng) {
+      Object.values(state.families).forEach(fam => {
+        // federal skor: aşırı yozlaşma + kaçakçılık hacmi + ısı
+        const corr = corruptionLevel(fam);
+        let gain = 0;
+        if (corr > rules.federalCorruptionTrigger) gain += (corr - rules.federalCorruptionTrigger) * 0.05;
+        gain += (fam.smuggleVolume || 0) / rules.federalSmuggleDivisor;
+        gain += fam.heat * 0.02;
+        fam.federalHeat = util.clamp((fam.federalHeat || 0) + gain - rules.federalHeatDecay, 0, 100);
+        fam.smuggleVolume = Math.max(0, (fam.smuggleVolume || 0) * 0.85);
+        if (fam.wiretapTicks > 0) fam.wiretapTicks--;
+
+        // Telefon dinleme
+        if (fam.federalHeat >= rules.federalWiretapThreshold && rng.chance(0.15)) {
+          fam.wiretapTicks = Math.max(fam.wiretapTicks, rules.federalWiretapTicks);
+          if (fam.isPlayer) report(state, rng, 'agency.wiretap', { agency: rng.pick(data.agencies).name, family: fam.name });
+        }
+
+        // Şafak operasyonu + varlık dondurma (yerel korumayı bypass)
+        if (fam.federalHeat >= rules.federalRaidThreshold && rng.chance(0.2)) {
+          const agency = rng.pick(data.agencies);
+          const frozen = Math.round(fam.cleanMoney * rules.federalFreezeRate);
+          fam.cleanMoney -= frozen;
+          // Bakan ulusal düzeyde %30 tutuklamayı engelleyebilir (federal yine de el koyar)
+          const blocked = fam.corruption && fam.corruption.minister && rng.chance(0.3);
+          if (!blocked) {
+            const famBoss = familyMembers(state, fam).find(c => c.role === 'BOSS' && c.status !== 'dead');
+            const others = familyMembers(state, fam).filter(c => c.status === 'active' && c.role !== 'BOSS');
+            const targetChar = (fam.federalHeat >= rules.federalBossArrestThreshold && famBoss) ? famBoss : (others[0] || famBoss);
+            if (targetChar && !targetChar.isArrested) arrest(state, rng, targetChar, rng.int(rules.prisonSentenceMin, rules.prisonSentenceMax));
+            fam.redNotice = true;
+          }
+          fam.federalHeat = util.clamp(fam.federalHeat - 30, 0, 100);
+          if (fam.isPlayer) report(state, rng, 'agency.raid', { agency: agency.name, family: fam.name, amount: frozen });
+        }
+      });
+    }
+  }
+
+  // Tutuklama: karaktere hapis durumu kurar
+  function arrest(state, rng, c, months) {
+    c.status = 'jailed'; c.isArrested = true;
+    c.prison = { sentence: months, respect: 0, comfort: 0, guards: 0, recruits: [] };
+    const fam = state.families[c.familyId];
+    if (fam && fam.isPlayer) report(state, rng, 'arrest', { name: c.name, months });
+  }
+
+  // Tahliye: hapisten çıkar, devşirilen mahkumları ekibe katar
+  function release(state, rng, c) {
+    c.isArrested = false; c.status = 'active';
+    const fam = state.families[c.familyId];
+    if (fam && c.prison && c.prison.recruits.length) {
+      c.prison.recruits.forEach(rid => {
+        const r = state.characters[rid];
+        if (r) { r.familyId = fam.id; r.status = 'active'; if (!fam.memberIds.includes(rid)) fam.memberIds.push(rid); }
+      });
+    }
+    c.prison = null;
+    if (fam && fam.isPlayer) report(state, rng, 'prison.release', { name: c.name });
+  }
+
+  // HAPİSHANE RPG — ceza sayacı + avlu olayları + tahliye
+  class PrisonSystem {
+    update(state, rng) {
+      Object.values(state.characters).forEach(c => {
+        if (!c.isArrested || !c.prison) return;
+        c.prison.sentence -= 1;
+        c.prison.respect = util.clamp(c.prison.respect + (rng.next() - 0.5) * 4, 0, 100);
+        if (rng.chance(0.05)) { c.attributes.health = util.clamp(c.attributes.health - rng.int(2, 8), 0, 100); c.health = c.attributes.health; }
+        if (c.prison.sentence <= 0) release(state, rng, c);
+      });
+    }
+  }
+
+  // Oyuncunun hapisteki patronu (komutlar bunun üstünde çalışır)
+  function playerArrestedBoss(state) {
+    const b = state.characters[state.dynasty.bossId];
+    return (b && b.isArrested && b.prison) ? b : null;
+  }
+
+  function doPrisonFight(state, rng) {
+    const b = playerArrestedBoss(state); if (!b) return { ok: false, reason: 'not_in_prison' };
+    const win = rng.next() < util.clamp(0.4 + b.skills.combat / 200 + b.courage / 300, 0.1, 0.9);
+    if (win) { b.skills.combat = util.clamp(b.skills.combat + 3, 1, 100); b.prison.respect = util.clamp(b.prison.respect + 10, 0, 100); }
+    else { b.attributes.health = util.clamp(b.attributes.health - rules.prisonFightHealthRisk, 0, 100); b.health = b.attributes.health; b.prison.respect = util.clamp(b.prison.respect - 3, 0, 100); }
+    report(state, rng, 'prison.fight', { name: b.name, result: win ? 'üstün geldi' : 'yenildi' });
+    return { ok: true, win, respect: b.prison.respect };
+  }
+
+  function doPrisonBribeGuard(state, rng) {
+    const b = playerArrestedBoss(state); if (!b) return { ok: false, reason: 'not_in_prison' };
+    const fam = playerFamily(state);
+    if (totalMoney(fam) < rules.guardBribeCost) return { ok: false, reason: 'no_money' };
+    payFrom(fam, rules.guardBribeCost);
+    b.prison.guards = util.clamp(b.prison.guards + 1, 0, 10);
+    b.prison.comfort = util.clamp(b.prison.comfort + 15, 0, 100);
+    report(state, rng, 'prison.bribe', { name: b.name });
+    return { ok: true, comfort: b.prison.comfort, guards: b.prison.guards };
+  }
+
+  function doPrisonRecruit(state, rng) {
+    const b = playerArrestedBoss(state); if (!b) return { ok: false, reason: 'not_in_prison' };
+    const chance = util.clamp(0.3 + b.skills.charisma / 200 + b.prison.respect / 200, 0.1, 0.9);
+    if (rng.next() < chance) {
+      const inmate = model.createCharacter(state, rng, null, 'ASSOCIATE');
+      inmate.status = 'jailed';   // devşirildi; tahliyede ekibe katılacak
+      state.characters[inmate.id] = inmate;
+      b.prison.recruits.push(inmate.id);
+      report(state, rng, 'prison.recruit', { name: b.name, recruit: inmate.name });
+      return { ok: true, recruited: true, recruitId: inmate.id };
+    }
+    return { ok: true, recruited: false };
+  }
+
+  function doPrisonEscape(state, rng, method) {
+    const b = playerArrestedBoss(state); if (!b) return { ok: false, reason: 'not_in_prison' };
+    const fam = playerFamily(state);
+    method = (method === 'bribe' || method === 'riot') ? method : 'tunnel';
+    const lawyers = membersWithPerk(state, fam, 'legal').length;
+    const hitmen = membersWithPerk(state, fam, 'combat').length;
+    let base = 0.15 + b.attributes.intelligence / 300 + b.courage / 400 + b.prison.comfort / 300 + b.prison.guards * 0.03;
+    if (method === 'bribe') base += lawyers * 0.12 + b.prison.guards * 0.05;        // sahte tahliye
+    else if (method === 'riot') base += hitmen * 0.08 + b.prison.respect / 300;      // isyan
+    else base += b.attributes.intelligence / 250;                                    // tünel
+    const chance = util.clamp(base, 0.05, 0.92);
+    if (rng.next() < chance) {
+      release(state, rng, b);
+      fam.federalHeat = util.clamp((fam.federalHeat || 0) + 20, 0, 100); fam.redNotice = true;
+      report(state, rng, 'prison.escape', { name: b.name, method });
+      return { ok: true, escaped: true };
+    }
+    b.prison.sentence += rules.escapeBasePenalty;
+    b.prison.respect = util.clamp(b.prison.respect - 5, 0, 100);
+    if (method === 'riot') { b.attributes.health = util.clamp(b.attributes.health - 15, 0, 100); b.health = b.attributes.health; }
+    report(state, rng, 'prison.escape.fail', { name: b.name });
+    return { ok: true, escaped: false };
+  }
+
   const crewSystem = new CrewSystem();
   const moleSystem = new MoleSystem();
   const diplomacySystem = new DiplomacySystem();
+  const agencySystem = new AgencySystem();
+  const prisonSystem = new PrisonSystem();
   // Living World tick'ine kaydet (saf fonksiyon imzasıyla)
   systems.crew = (state, rng) => crewSystem.update(state, rng);
   systems.mole = (state, rng) => moleSystem.update(state, rng);
   systems.diplomacy = (state, rng) => diplomacySystem.update(state, rng);
+  systems.agency = (state, rng) => agencySystem.update(state, rng);
+  systems.prison = (state, rng) => prisonSystem.update(state, rng);
 
   // Oyuncu komutları (deterministik, rngState'i ilerletir; aktör = oyuncu ailesi)
   const commands = {
@@ -1397,12 +1605,16 @@
     sellGood: (state, goodId, qty, city) => withRng(state, rng => doSellGood(state, rng, playerFamily(state).id, goodId, qty, city)),
     bribe: (state, officialId) => withRng(state, rng => doBribe(state, rng, playerFamily(state).id, officialId)),
     buyBusiness: (state, typeId) => withRng(state, rng => doBuyBusiness(state, rng, playerFamily(state).id, typeId)),
+    prisonFight: (state) => withRng(state, rng => doPrisonFight(state, rng)),
+    prisonBribeGuard: (state) => withRng(state, rng => doPrisonBribeGuard(state, rng)),
+    prisonRecruit: (state) => withRng(state, rng => doPrisonRecruit(state, rng)),
+    prisonEscape: (state, method) => withRng(state, rng => doPrisonEscape(state, rng, method)),
   };
 
   /* ----------------------------------------------------------------------
    * engine — tick orkestrasyonu (deterministik faz sırası)
    * -------------------------------------------------------------------- */
-  const PHASES = ['market', 'economy', 'laundering', 'crime', 'world', 'ai', 'psychology', 'crew', 'mole', 'diplomacy', 'corruption'];   // her tick (=1 ay)
+  const PHASES = ['market', 'economy', 'laundering', 'crime', 'world', 'agency', 'ai', 'psychology', 'crew', 'mole', 'diplomacy', 'corruption', 'prison'];   // her tick (=1 ay)
   const YEARLY = ['aging', 'rank', 'worldEconomyYear'];               // yılda bir
 
   function tick(state) {
@@ -1433,7 +1645,9 @@
 
   function run(state, ticks) { for (let i = 0; i < ticks; i++) tick(state); return state; }
 
-  const engine = { tick, run, advanceYear, PHASES, YEARLY };
+  // Oyuncunun patronu hapiste mi? (UI ana döngüyü duraklatıp hapis ekranına geçer)
+  function isInPrison(state) { const b = state.characters[state.dynasty.bossId]; return !!(b && b.isArrested); }
+  const engine = { tick, run, advanceYear, isInPrison, PHASES, YEARLY };
 
   /* ----------------------------------------------------------------------
    * persist — Save/Load (LocalStorage) + checksum + migration
@@ -1511,6 +1725,20 @@
         if (b.staffCost == null) b.staffCost = bt.staff != null ? bt.staff : 200;
         if (b.auditRisk == null) b.auditRisk = bt.audit != null ? bt.audit : 0.05;
         if (b.efficiency == null) b.efficiency = bt.eff != null ? bt.eff : 0.82;
+      });
+      return s;
+    },
+    // v4 → v5: federal istihbarat alanları + hapishane RPG durumu
+    5: s => {
+      Object.values(s.families || {}).forEach(f => {
+        if (f.federalHeat == null) f.federalHeat = 0;
+        if (f.smuggleVolume == null) f.smuggleVolume = 0;
+        if (f.wiretapTicks == null) f.wiretapTicks = 0;
+        if (f.redNotice == null) f.redNotice = false;
+      });
+      Object.values(s.characters || {}).forEach(c => {
+        if (c.isArrested == null) c.isArrested = (c.status === 'jailed');
+        if (c.prison === undefined) c.prison = null;
       });
       return s;
     },
@@ -1658,10 +1886,11 @@
     const v1env = JSON.stringify({ version: 1, checksum: '', state: '' });
     const v1state = { meta: { version: 1, seed: 1, createdAt: 0, saveName: 'x', nextId: 5 }, clock: { tick: 3, day: 10, year: 1 }, families: { f1: { id: 'f1', isPlayer: true, cleanMoney: 1, dirtyMoney: 0, reputation: 5, heat: 0, memberIds: ['c1'], territoryIds: [], businessIds: [], relations: {} } }, characters: { c1: { id: 'c1', familyId: 'f1', name: 'X', role: 'BOSS', stats: { combat: 40, cunning: 40, charisma: 40, loyalty: 40, management: 40 }, age: 30, health: 90, status: 'active', relations: {} } }, territories: {}, operations: {}, businesses: {}, market: { goods: {}, trends: {} }, world: { newsFeed: [] }, dynasty: { bossId: 'c1', history: [] }, eventLog: [], flags: {} };
     const migrated = persist.runMigrations(JSON.parse(JSON.stringify(v1state)));
-    check('Migration v1→v4 alanları doldurur', migrated.meta.version === 4 && migrated.clock.month === 1 &&
+    check('Migration v1→v5 alanları doldurur', migrated.meta.version === 5 && migrated.clock.month === 1 &&
       !!migrated.characters.c1.vitals && !!migrated.families.f1.school &&
       migrated.families.f1.armedMen != null && migrated.characters.c1.job === 'none' && !!migrated.families.f1.relations &&
-      !!migrated.families.f1.inventory && !!migrated.families.f1.corruption && !!migrated.market.goods.weapon);
+      !!migrated.families.f1.inventory && !!migrated.families.f1.corruption && !!migrated.market.goods.weapon &&
+      migrated.families.f1.federalHeat != null && migrated.characters.c1.isArrested != null && migrated.characters.c1.prison === null);
 
     // 15) 6 isimli rakip aile sabit kadro
     const s15 = createNewGame(1, { now: 1 });
@@ -1769,6 +1998,62 @@
     const ea = run(createNewGame(333, { now: 18 }), 24), eb = run(createNewGame(333, { now: 18 }), 24);
     check('11 fazlı tick determinizmi', JSON.stringify(ea) === JSON.stringify(eb));
 
+    // 33) Federal: yüksek yozlaşma + kaçakçılık federal ısıyı biriktirir
+    const fed = createNewGame(1212, { now: 20 }); const pf33 = playerFamily(fed);
+    pf33.cleanMoney = 3000000; ['mayor', 'prosecutor', 'policeChief', 'judge', 'minister'].forEach(o => commands.bribe(fed, o));
+    pf33.smuggleVolume = 800; pf33.heat = 60;
+    const rngf = util.makeRng(9); for (let i = 0; i < 15; i++) systems.agency(fed, rngf);
+    check('Federal ısı birikir', playerFamily(fed).federalHeat > 0);
+
+    // 34) Federal baskın policeChief'i bypass eder, temiz banka parasına el koyar
+    const fz = createNewGame(1313, { now: 21 }); const pf34 = playerFamily(fz);
+    pf34.cleanMoney = 1000000; pf34.corruption.policeChief = true; pf34.federalHeat = 95;
+    const clean0_34 = pf34.cleanMoney; const rngz = util.makeRng(3);
+    let frozen = false; for (let i = 0; i < 30 && !frozen; i++) { systems.agency(fz, rngz); if (playerFamily(fz).cleanMoney < clean0_34) frozen = true; }
+    check('Federal varlık dondurma (policeChief bypass)', frozen);
+
+    // 35) Tutuklama isArrested + hapis durumu kurar
+    const ar = createNewGame(1414, { now: 22 }); const bossA = ar.characters[ar.dynasty.bossId];
+    arrest(ar, util.makeRng(1), bossA, 6);
+    check('Tutuklama hapis durumu kurar', bossA.isArrested === true && !!bossA.prison && bossA.status === 'jailed');
+
+    // 36) Hapis tick'i cezayı azaltır ve süre dolunca tahliye eder
+    const prr = createNewGame(1515, { now: 23 }); const bp = prr.characters[prr.dynasty.bossId];
+    arrest(prr, util.makeRng(1), bp, 3);
+    for (let i = 0; i < 5; i++) systems.prison(prr, util.makeRng(100 + i));
+    check('Ceza dolunca tahliye', bp.isArrested === false && bp.status === 'active');
+
+    // 37) Mahkum devşirme çıkışta ekibe katar
+    const rc = createNewGame(1616, { now: 24 }); const bc = rc.characters[rc.dynasty.bossId]; const pf37 = playerFamily(rc);
+    arrest(rc, util.makeRng(1), bc, 2); bc.skills.charisma = 99; bc.prison.respect = 80;
+    let recruitId = null; for (let i = 0; i < 25 && !recruitId; i++) { const r = commands.prisonRecruit(rc); if (r.recruited) recruitId = r.recruitId; }
+    for (let i = 0; i < 5; i++) systems.prison(rc, util.makeRng(200 + i));
+    check('Devşirilen mahkum tahliyede ekibe katılır', !!recruitId && playerFamily(rc).memberIds.includes(recruitId));
+
+    // 38) Ring dövüşü hapis durumunu etkiler
+    const rf = createNewGame(1818, { now: 26 }); const br2 = rf.characters[rf.dynasty.bossId];
+    arrest(rf, util.makeRng(1), br2, 10);
+    const respect0 = br2.prison.respect, health0 = br2.attributes.health;
+    commands.prisonFight(rf);
+    check('Ring dövüşü etki eder', br2.prison.respect !== respect0 || br2.attributes.health !== health0);
+
+    // 39) Gardiyan rüşveti hücre konforunu artırır
+    const gb = createNewGame(1919, { now: 27 }); const bg = gb.characters[gb.dynasty.bossId]; playerFamily(gb).cleanMoney = 100000;
+    arrest(gb, util.makeRng(1), bg, 10);
+    const comfort0 = bg.prison.comfort; commands.prisonBribeGuard(gb);
+    check('Gardiyan rüşveti konforu artırır', bg.prison.comfort > comfort0);
+
+    // 40) Firar planı tahliye sağlayabilir
+    const es = createNewGame(1717, { now: 25 }); const be = es.characters[es.dynasty.bossId]; playerFamily(es).cleanMoney = 100000;
+    arrest(es, util.makeRng(1), be, 20); be.attributes.intelligence = 99; be.courage = 99;
+    commands.prisonBribeGuard(es);
+    let escaped = false; for (let i = 0; i < 50 && !escaped; i++) { const r = commands.prisonEscape(es, 'tunnel'); if (r.escaped) escaped = true; }
+    check('Firar planı çalışır', escaped && be.isArrested === false);
+
+    // 41) Genişletilmiş tick (13 faz) deterministik
+    const ga = run(createNewGame(444, { now: 28 }), 24), gbq = run(createNewGame(444, { now: 28 }), 24);
+    check('13 fazlı tick determinizmi', JSON.stringify(ga) === JSON.stringify(gbq));
+
     const passed = results.filter(r => r.ok).length;
     const total = results.length;
     const log = (typeof console !== 'undefined') ? console : { log: () => {} };
@@ -1781,14 +2066,14 @@
    * Public API
    * -------------------------------------------------------------------- */
   root.AHTAPOT = {
-    version: '0.5-economy-trade-laundering-corruption',
+    version: '0.6-agency-prison',
     util, rules, data, model,
     state: {
       createNewGame, applyStartChoice, CURRENT_VERSION, playerFamily,
-      helpers: { familyMembers, busyCrew, totalMoney, schoolMod, rankFor, rankName, crewAttrs, crewLimit, jobName, familyPower, avgLoyalty, relationOf, alliesOf, isEmbargoed, corruptionLevel, cityFactor, catFactor },
+      helpers: { familyMembers, busyCrew, totalMoney, schoolMod, rankFor, rankName, crewAttrs, crewLimit, jobName, familyPower, avgLoyalty, relationOf, alliesOf, isEmbargoed, corruptionLevel, cityFactor, catFactor, isInPrison, playerArrestedBoss },
     },
     story, systems, engine, persist, events, commands,
-    crewSystem, moleSystem, diplomacySystem,
+    crewSystem, moleSystem, diplomacySystem, agencySystem, prisonSystem,
     test: { selfTest },
   };
 })();
@@ -1835,6 +2120,7 @@
     'Temiz <code>' + fam.cleanMoney + '₺</code> · Kirli <code>' + fam.dirtyMoney + '₺</code> · Isı <code>' + fam.heat.toFixed(0) + '</code> · Yozlaşma <code>' + corr + '</code> · Paranoya <code>' + boss.vitals.paranoia.toFixed(0) + '</code><br>' +
     'Sağlık <code>' + boss.attributes.health.toFixed(0) + '</code> · Bölge <code>' + fam.territoryIds.length + '</code> · İşletme <code>' + fam.businessIds.length + '</code> · Üye <code>' + fam.memberIds.filter(id => g.characters[id] && g.characters[id].status === 'active').length + '</code><br>' +
     'Silahlı adam <code>' + fam.armedMen + '</code> · Güç <code>' + A.state.helpers.familyPower(g, fam) + '</code> · Savaş <code>' + wars + '</code> · İttifak <code>' + allies + '</code><br>' +
+    'Federal ısı <code>' + (fam.federalHeat || 0).toFixed(0) + '</code> · Kırmızı bülten <code>' + (fam.redNotice ? 'EVET' : 'hayır') + '</code> · Hapiste <code>' + (A.engine.isInPrison(g) ? 'EVET' : 'hayır') + '</code><br>' +
     'Ekonomi endeksi <code>' + econ + '</code> · Kripto Kaset fiyatı <code>' + cryptoP + '₺</code> · Rakip <code>' + (Object.keys(g.families).length - 1) + '</code>';
 
   newsEl.innerHTML = g.world.newsFeed.slice(0, 22).map(n => '<div>[Y' + Math.ceil((n.tick + 1) / 12) + '] ' + n.text + '</div>').join('') || '<div>Henüz haber yok…</div>';
