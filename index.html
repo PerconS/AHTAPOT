@@ -36,7 +36,7 @@
 </head>
 <body>
   <h1>AHTAPOT</h1>
-  <div class="sub">Suç Hanedanlığı & Mafya Yaşam Simülasyonu — <b>Modül: Ekip · Köstebek · Diplomasi & Çete Savaşları (UI yok)</b></div>
+  <div class="sub">Suç Hanedanlığı & Mafya Yaşam Simülasyonu — <b>Modül: Dinamik Ekonomi · Kaçak Ticaret · Aklama · Siyasi Yozlaşma (UI yok)</b></div>
 
   <div class="card">
     <h2>Durum</h2>
@@ -59,6 +59,8 @@
       <code>AHTAPOT.commands.hire(g, {job:'lawyer'})</code> — ekibe avukat al<br />
       <code>AHTAPOT.commands.declareWar(g, rivalId)</code> / <code>territoryWar</code> / <code>espionage</code> / <code>assassinate</code><br />
       <code>AHTAPOT.commands.surveil(g, charId)</code> / <code>interrogate</code> / <code>loyaltyTest</code> / <code>silence</code> (köstebek)<br />
+      <code>AHTAPOT.commands.buyGood(g, 'art', 2)</code> / <code>sellGood</code> — kaçak ticaret (ucuza al, pahalıya sat)<br />
+      <code>AHTAPOT.commands.bribe(g, 'policeChief')</code> / <code>buyBusiness(g, 'casino')</code> — yozlaşma & aklama<br />
       <code>AHTAPOT.persist.save('slot1', g)</code> / <code>AHTAPOT.persist.load('slot1')</code>
     </div>
   </div>
@@ -154,6 +156,19 @@
     warLuckSpread: 0.15,          // şans faktörü genişliği (deterministik rng)
     aiDiploChance: 0.08,          // AI'ın tick başına diplomatik hamle şansı
     embargoIncomePenalty: 0.25,   // ambargo altındaki ailenin ticaret/gelir cezası
+    // --- Dinamik piyasa & kaçak ticaret ---
+    marketReversion: 0.10,        // fiyatın hedefe geri dönüş hızı (mean-reversion)
+    tradeBustHeatThreshold: 0.0,  // ticaret bust'ı her zaman olası
+    tradeBustHeat: 10,            // ticaret yakalanırsa eklenen ısı
+    accountantLaunderBoost: 0.20, // Muhasebeci başına aklama kapasitesi artışı
+    auditFineRate: 0.10,          // denetimde temiz paranın kesilen oranı
+    auditPolicePressureBase: 0.5, // denetim riskinde polis baskısı taban katsayısı
+    // --- Siyasi yozlaşma ---
+    corruptionHeatSuppress: 0.03, // yozlaşma seviyesi başına tick'te ısı bastırma
+    corruptionAuditDivisor: 150,  // denetim riskini bastıran yozlaşma böleni
+    corruptionRaidDivisor: 130,   // baskın şansını bastıran yozlaşma böleni
+    leakSeizeReduction: 0.4,      // sızdırılan baskında el konan paranın çarpanı
+    courtReleaseDivisor: 250,     // yozlaşmayla hapisten salınma şansı böleni
   };
 
   /* ----------------------------------------------------------------------
@@ -167,11 +182,31 @@
       { id: 'heist', name: 'Soygun', baseRisk: 0.55, rewardMin: 4000, rewardMax: 12000, heat: 18, skills: ['cunning', 'combat'], duration: 8 },
       { id: 'hit', name: 'Suikast', baseRisk: 0.6, rewardMin: 0, rewardMax: 0, heat: 22, skills: ['combat', 'cunning'], duration: 5 },
     ],
+    // İşletmeler — kara para aklama cepheleri (personel/denetim/verim ile)
     businessTypes: [
-      { id: 'restaurant', name: 'Restoran', income: 400, launder: 800, cover: 0.4 },
-      { id: 'casino', name: 'Kumarhane', income: 1500, launder: 3000, cover: 0.6 },
-      { id: 'laundromat', name: 'Çamaşırhane', income: 150, launder: 1200, cover: 0.5 },
-      { id: 'club', name: 'Gece Kulübü', income: 900, launder: 2000, cover: 0.55 },
+      { id: 'carwash', name: 'Oto Yıkama', income: 300, launder: 1000, cover: 0.45, staff: 120, audit: 0.04, eff: 0.85, cost: 12000 },
+      { id: 'restaurant', name: 'Lüks Restoran', income: 600, launder: 1500, cover: 0.50, staff: 350, audit: 0.05, eff: 0.82, cost: 25000 },
+      { id: 'club', name: 'Gece Kulübü', income: 900, launder: 2200, cover: 0.55, staff: 400, audit: 0.07, eff: 0.80, cost: 40000 },
+      { id: 'artgallery', name: 'Sanat Galerisi', income: 500, launder: 2800, cover: 0.65, staff: 300, audit: 0.06, eff: 0.90, cost: 55000 },
+      { id: 'casino', name: 'Kumarhane', income: 1600, launder: 3500, cover: 0.60, staff: 700, audit: 0.10, eff: 0.78, cost: 90000 },
+      { id: 'techfirm', name: 'Teknoloji Şirketi', income: 1400, launder: 4000, cover: 0.50, staff: 900, audit: 0.08, eff: 0.88, cost: 120000 },
+    ],
+    // Kaçak ticaret malları — kategori makro ekonomiye duyarlılığı belirler
+    goods: [
+      { id: 'weapon', name: 'Silah', base: 5000, vol: 0.18, risk: 0.12, cat: 'weapon' },
+      { id: 'watch', name: 'Lüks Saat', base: 8000, vol: 0.12, risk: 0.05, cat: 'luxury' },
+      { id: 'chip', name: 'Kaçak Çip', base: 3000, vol: 0.20, risk: 0.08, cat: 'tech' },
+      { id: 'cryptotape', name: 'Kripto Kaset', base: 2000, vol: 0.30, risk: 0.10, cat: 'crypto' },
+      { id: 'art', name: 'Nadir Sanat Eseri', base: 15000, vol: 0.15, risk: 0.07, cat: 'art' },
+      { id: 'prototype', name: 'Teknoloji Prototipi', base: 12000, vol: 0.25, risk: 0.15, cat: 'tech' },
+    ],
+    // Satın alınabilir siyasi/yargı/emniyet figürleri (rüşvet)
+    officials: [
+      { id: 'mayor', name: 'Belediye Başkanı', cost: 50000, corruption: 15, upkeep: 3000 },
+      { id: 'prosecutor', name: 'Savcı', cost: 80000, corruption: 20, upkeep: 5000 },
+      { id: 'policeChief', name: 'Emniyet Müdürü', cost: 100000, corruption: 22, upkeep: 6000 },
+      { id: 'judge', name: 'Hakim', cost: 120000, corruption: 25, upkeep: 7000 },
+      { id: 'minister', name: 'Bakan', cost: 300000, corruption: 30, upkeep: 15000 },
     ],
     archetypes: ['aggressor', 'merchant', 'schemer', 'turtle', 'opportunist'],
     // Suç ekolleri — çarpan tabanlı modifier'lar (1.0 = nötr). Sistemler bunları okur.
@@ -319,6 +354,33 @@
       'assassination': [
         'Suikast: {family}, {rival} saflarından {name} adlı ismi devirdi.',
       ],
+      'trade.buy': [
+        '{family}, {city}\'de {qty} adet {good} aldı ({amount}₺).',
+      ],
+      'trade.sell': [
+        '{family}, {city}\'de {qty} adet {good} sattı ({amount}₺).',
+      ],
+      'trade.bust': [
+        'Gümrükte yakalandı! {family}\'nin {good} sevkiyatı ele geçirildi.',
+      ],
+      'launder.audit': [
+        'Vergi denetimi! {family}\'nin {business} işletmesine {amount}₺ ceza kesildi.',
+      ],
+      'macro': [
+        'Ekonomi haberi: {event}.',
+      ],
+      'corruption.bribe': [
+        '{family} {name} cebine aldı. Çarklar artık daha sessiz dönüyor.',
+      ],
+      'corruption.leak': [
+        'Sızıntı sayesinde baskın önceden haber alındı; {family} zararı azalttı.',
+      ],
+      'corruption.release': [
+        'Dosya kapandı: {name} beraat etti ve sokağa geri döndü.',
+      ],
+      'corruption.collapse': [
+        '{family} rüşvet ağını besleyemedi; {name} desteğini çekti.',
+      ],
     },
   };
 
@@ -378,9 +440,12 @@
         id: nextId(state, 'b'),
         ownerId,
         type: type.id,
-        income: type.income,
-        launderCapacity: type.launder,
+        income: type.income,              // temiz banka geliri kapasitesi
+        launderCapacity: type.launder,    // tick başına aklanabilir kirli nakit
         coverStrength: type.cover,
+        staffCost: type.staff,            // personel gideri
+        auditRisk: type.audit,            // vergi/denetim riski
+        efficiency: type.eff,             // kirli→temiz aklama verimi
         heat: 0,
       };
     },
@@ -400,6 +465,8 @@
         reputation: rng.int(10, 40),
         heat: 0,
         armedMen: isPlayer ? 3 : rng.int(6, 18),          // Silahlı Adam Sayısı
+        inventory: {},                                    // kaçak mal stoğu { goodId: adet }
+        corruption: { mayor: false, prosecutor: false, policeChief: false, judge: false, minister: false },
         memberIds: [],
         territoryIds: [],
         businessIds: [],
@@ -433,7 +500,7 @@
   /* ----------------------------------------------------------------------
    * state — yeni oyun kurulumu (deterministik, seed'e bağlı)
    * -------------------------------------------------------------------- */
-  const CURRENT_VERSION = 3;
+  const CURRENT_VERSION = 4;
 
   function createNewGame(seed, opts) {
     opts = opts || {};
@@ -525,6 +592,11 @@
       const b = model.createBusiness(state, player.id, bt);
       state.businesses[b.id] = b;
       player.businessIds.push(b.id);
+    });
+
+    // --- Dinamik piyasa: kaçak mal fiyatları ---
+    data.goods.forEach(g => {
+      state.market.goods[g.id] = { price: g.base, base: g.base, supply: 1, demand: 1, vol: g.vol };
     });
 
     // --- Aileler arası ilişki ağı (başlangıçta barış, hafif rastgele standing) ---
@@ -655,6 +727,28 @@
     rb.standing = util.clamp(rb.standing + delta, -100, 100);
   }
   function areAtWar(fam, otherId) { return relationOf(fam, otherId).treaty === 'war'; }
+  // Makro ekonomi → mal kategorisi fiyat çarpanı (econ 0.1..1.0)
+  function catFactor(cat, econ) {
+    switch (cat) {
+      case 'luxury': return 0.7 + econ * 0.7;   // refahta lüks pahalanır
+      case 'art': return 0.75 + econ * 0.6;
+      case 'tech': return 0.85 + econ * 0.4;
+      case 'crypto': return 0.6 + econ * 0.9;   // en oynak
+      case 'weapon': return 1.25 - econ * 0.4;  // krizde silah pahalanır
+      default: return 1;
+    }
+  }
+  // Toplam yozlaşma seviyesi (0..100): sahip olunan figürlerin ağırlık toplamı
+  function corruptionLevel(fam) {
+    if (!fam.corruption) return 0;
+    let lvl = 0; data.officials.forEach(o => { if (fam.corruption[o.id]) lvl += o.corruption; });
+    return Math.min(100, lvl);
+  }
+  // Şehir × mal fiyat faktörü (deterministik) → bölgesel arbitraj fırsatı (0.85..1.15)
+  function cityFactor(city, goodId) {
+    const h = parseInt(util.fnv1a(String(city) + goodId), 16);
+    return 0.85 + (h % 31) / 100;
+  }
 
   /* ----------------------------------------------------------------------
    * story — procedural anlatı motoru (şablon + ikame)
@@ -697,27 +791,12 @@
         haraç = Math.round(haraç * schoolMod(fam, 'dirtyIncomeMult', 1));  // Kartel +30% vb.
         fam.dirtyMoney += haraç;
 
-        // İşletme geliri → temiz para (ambargo altındaysa düşer)
-        let clean = 0, launderCap = 0;
-        fam.businessIds.forEach(bid => {
-          const b = state.businesses[bid];
-          if (!b) return; clean += b.income; launderCap += b.launderCapacity;
-        });
-        if (isEmbargoed(fam)) clean = Math.round(clean * (1 - rules.embargoIncomePenalty));
-        launderCap = Math.round(launderCap * (1 + 0.2 * membersWithPerk(state, fam, 'launder').length)); // Muhasebeci aklamayı artırır
-        fam.cleanMoney += clean;
-
-        // Kara para aklama (kapasite kadar, ekole göre değişen kesintiyle)
-        const launder = Math.min(fam.dirtyMoney, launderCap);
-        if (launder > 0) {
-          fam.dirtyMoney -= launder;
-          const cut = util.clamp(rules.launderCut * schoolMod(fam, 'launderCostMult', 1), 0, 0.9); // İtalyan -5%
-          fam.cleanMoney += Math.round(launder * (1 - cut));
-        }
-
-        // Personel maaşı (önce temiz, sonra kirli)
+        // Personel maaşı: rol maaşı + pozisyon (job) maaşı (önce temiz, sonra kirli)
         let upkeep = 0;
-        familyMembers(state, fam).forEach(c => { if (c.status === 'active') upkeep += (rules.salary[c.role] || 0); });
+        familyMembers(state, fam).forEach(c => {
+          if (c.status !== 'active') return;
+          upkeep += (rules.salary[c.role] || 0) + (rules.jobSalary[c.job] || 0);
+        });
         payFrom(fam, upkeep);
 
         // Aile ısısı zamanla soğur
@@ -725,6 +804,79 @@
 
         if (fam.isPlayer && haraç > 0 && state.clock.tick % 5 === 0) {
           report(state, rng, 'income', { family: fam.name, amount: haraç });
+        }
+      });
+    },
+
+    // KARA PARA AKLAMA: işletme temiz geliri + personel gideri + kirli→temiz
+    // dönüşümü (verim + Muhasebeci + ekol) + vergi denetimi (yozlaşma/avukat azaltır)
+    laundering(state, rng) {
+      Object.values(state.families).forEach(fam => {
+        const businesses = fam.businessIds.map(id => state.businesses[id]).filter(Boolean);
+        if (!businesses.length) return;
+        let clean = 0, cap = 0, staff = 0, effSum = 0;
+        businesses.forEach(b => { clean += b.income; cap += b.launderCapacity; staff += (b.staffCost || 0); effSum += (b.efficiency || 0.8); });
+        if (isEmbargoed(fam)) clean = Math.round(clean * (1 - rules.embargoIncomePenalty));
+        cap = Math.round(cap * (1 + rules.accountantLaunderBoost * membersWithPerk(state, fam, 'launder').length));
+        const avgEff = effSum / businesses.length;
+        fam.cleanMoney += clean;
+        payFrom(fam, staff);   // personel gideri
+        // kirli → temiz
+        const launder = Math.min(fam.dirtyMoney, cap);
+        if (launder > 0) {
+          fam.dirtyMoney -= launder;
+          const cut = util.clamp(rules.launderCut * schoolMod(fam, 'launderCostMult', 1), 0, 0.9);
+          fam.cleanMoney += Math.round(launder * (1 - cut) * avgEff);
+        }
+        // vergi/denetim riski
+        const corr = corruptionLevel(fam);
+        const lawyers = membersWithPerk(state, fam, 'legal').length;
+        businesses.forEach(b => {
+          let auditRisk = (b.auditRisk != null ? b.auditRisk : 0.05) * (rules.auditPolicePressureBase + state.market.trends.policePressure);
+          auditRisk *= (1 - corr / rules.corruptionAuditDivisor);
+          if (fam.corruption && (fam.corruption.minister || fam.corruption.prosecutor)) auditRisk *= 0.6;
+          auditRisk *= (1 - 0.1 * lawyers);
+          if (rng.chance(util.clamp(auditRisk, 0, 0.6))) {
+            const fine = Math.round(fam.cleanMoney * rules.auditFineRate + 2000);
+            payFrom(fam, fine); fam.heat = util.clamp(fam.heat + 8, 0, 100);
+            const bt = data.businessTypes.find(t => t.id === b.type);
+            if (fam.isPlayer) report(state, rng, 'launder.audit', { family: fam.name, business: bt ? bt.name : b.type, amount: fine });
+          }
+        });
+      });
+    },
+
+    // DİNAMİK PİYASA: kaçak mal fiyatları (mean-reversion + makro tilt + dalga)
+    market(state, rng) {
+      const econ = state.market.trends.economy;
+      data.goods.forEach(g => {
+        const m = state.market.goods[g.id]; if (!m) return;
+        const target = m.base * catFactor(g.cat, econ);
+        let p = m.price + (target - m.price) * rules.marketReversion + (rng.next() - 0.5) * g.vol * m.base;
+        m.price = util.clamp(Math.round(p), Math.round(m.base * 0.4), Math.round(m.base * 2.2));
+        m.demand = util.clamp(m.demand + (rng.next() - 0.5) * 0.05, 0.2, 1.8);
+        m.supply = util.clamp(m.supply + (rng.next() - 0.5) * 0.05, 0.2, 1.8);
+      });
+    },
+
+    // SİYASİ YOZLAŞMA: rüşvet bakımı + ısı bastırma + mahkeme (dosya kapatma)
+    corruption(state, rng) {
+      Object.values(state.families).forEach(fam => {
+        if (!fam.corruption) return;
+        let upkeep = 0; data.officials.forEach(o => { if (fam.corruption[o.id]) upkeep += o.upkeep; });
+        if (upkeep > 0) {
+          if (fam.cleanMoney >= upkeep) fam.cleanMoney -= upkeep;
+          else { // ödenemezse bir figür desteğini çeker
+            const owned = data.officials.filter(o => fam.corruption[o.id]);
+            if (owned.length) { const drop = rng.pick(owned); fam.corruption[drop.id] = false; if (fam.isPlayer) report(state, rng, 'corruption.collapse', { family: fam.name, name: drop.name }); }
+          }
+        }
+        const lvl = corruptionLevel(fam);
+        if (lvl > 0) fam.heat = util.clamp(fam.heat - lvl * rules.corruptionHeatSuppress, 0, 100);
+        if (fam.corruption.judge || fam.corruption.prosecutor) {
+          familyMembers(state, fam).filter(c => c.status === 'jailed').forEach(c => {
+            if (rng.chance(lvl / rules.courtReleaseDivisor)) { c.status = 'active'; if (fam.isPlayer) report(state, rng, 'corruption.release', { name: c.name }); }
+          });
         }
       });
     },
@@ -753,16 +905,23 @@
       state.world.policeHeatGlobal += (avgHeat - state.world.policeHeatGlobal) * 0.1;
       state.world.policeHeatGlobal = util.clamp(state.world.policeHeatGlobal, 0, 100);
 
-      // Yüksek ısılı ailelere baskın riski
+      // Yüksek ısılı ailelere baskın riski (polis baskısı artırır, yozlaşma bastırır)
       fams.forEach(fam => {
-        if (fam.heat >= rules.raidHeatThreshold && rng.chance(rules.raidChancePerTick)) {
-          const seized = Math.round((fam.dirtyMoney) * rng.int(20, 50) / 100);
+        const corr = corruptionLevel(fam);
+        const raidChance = rules.raidChancePerTick * (rules.auditPolicePressureBase + state.market.trends.policePressure) * (1 - corr / rules.corruptionRaidDivisor);
+        if (fam.heat >= rules.raidHeatThreshold && rng.chance(util.clamp(raidChance, 0, 0.9))) {
+          const leaked = fam.corruption && fam.corruption.policeChief;   // operasyon önceden sızdırıldı
+          let seized = Math.round((fam.dirtyMoney) * rng.int(20, 50) / 100);
+          if (leaked) seized = Math.round(seized * rules.leakSeizeReduction);
           fam.dirtyMoney = Math.max(0, fam.dirtyMoney - seized);
           fam.heat = util.clamp(fam.heat - 25, 0, 100);
-          // aktif bir üyeyi tutukla
-          const active = familyMembers(state, fam).filter(c => c.status === 'active' && c.role !== 'BOSS');
-          if (active.length) rng.pick(active).status = 'jailed';
-          if (fam.isPlayer || rng.chance(0.4)) report(state, rng, 'raid', { family: fam.name, amount: seized });
+          // sızdırılmadıysa aktif bir üyeyi tutukla
+          if (!leaked) {
+            const active = familyMembers(state, fam).filter(c => c.status === 'active' && c.role !== 'BOSS');
+            if (active.length) rng.pick(active).status = 'jailed';
+          }
+          if (fam.isPlayer && leaked) report(state, rng, 'corruption.leak', { family: fam.name });
+          else if (fam.isPlayer || rng.chance(0.4)) report(state, rng, 'raid', { family: fam.name, amount: seized });
         }
       });
     },
@@ -1151,6 +1310,64 @@
     return { ok: true, success };
   }
 
+  // KAÇAK TİCARET — ucuza al, pahalıya sat (kirli para ile); yakalanma riski
+  function doBuyGood(state, rng, famId, goodId, qty, city) {
+    const fam = state.families[famId]; const g = data.goods.find(x => x.id === goodId); const m = state.market.goods[goodId];
+    if (!fam || !g || !m) return { ok: false, reason: 'bad_good' };
+    qty = Math.max(1, Math.floor(qty || 1)); city = city || fam.city;
+    const unit = Math.round(m.price * cityFactor(city, goodId) * (0.85 + m.supply * 0.15));
+    const cost = unit * qty;
+    if (fam.dirtyMoney < cost) return { ok: false, reason: 'no_money', cost };
+    fam.dirtyMoney -= cost;
+    fam.inventory[goodId] = (fam.inventory[goodId] || 0) + qty;
+    m.demand = util.clamp(m.demand + qty * 0.02, 0.2, 1.8);
+    // yakalanma riski
+    if (rng.chance(util.clamp(g.risk + fam.heat / 400, 0, 0.6))) {
+      fam.heat = util.clamp(fam.heat + rules.tradeBustHeat, 0, 100);
+      if (fam.isPlayer) report(state, rng, 'trade.bust', { family: fam.name, good: g.name });
+    } else if (fam.isPlayer) report(state, rng, 'trade.buy', { family: fam.name, city, qty, good: g.name, amount: cost });
+    return { ok: true, unit, cost };
+  }
+  function doSellGood(state, rng, famId, goodId, qty, city) {
+    const fam = state.families[famId]; const g = data.goods.find(x => x.id === goodId); const m = state.market.goods[goodId];
+    if (!fam || !g || !m) return { ok: false, reason: 'bad_good' };
+    const have = fam.inventory[goodId] || 0;
+    qty = Math.max(1, Math.min(Math.floor(qty || 1), have)); city = city || fam.city;
+    if (have <= 0) return { ok: false, reason: 'no_stock' };
+    const unit = Math.round(m.price * cityFactor(city, goodId) * (1.05 + m.demand * 0.1) * schoolMod(fam, 'tradeMult', 1));
+    const revenue = unit * qty;
+    fam.inventory[goodId] = have - qty;
+    fam.dirtyMoney += revenue;
+    m.supply = util.clamp(m.supply + qty * 0.02, 0.2, 1.8);
+    if (rng.chance(util.clamp(g.risk + fam.heat / 400, 0, 0.6))) {
+      fam.heat = util.clamp(fam.heat + rules.tradeBustHeat, 0, 100);
+      if (fam.isPlayer) report(state, rng, 'trade.bust', { family: fam.name, good: g.name });
+    } else if (fam.isPlayer) report(state, rng, 'trade.sell', { family: fam.name, city, qty, good: g.name, amount: revenue });
+    return { ok: true, unit, revenue };
+  }
+
+  // SİYASİ YOZLAŞMA — figür satın alma (rüşvet); temiz para ile
+  function doBribe(state, rng, famId, officialId) {
+    const fam = state.families[famId]; const o = data.officials.find(x => x.id === officialId);
+    if (!fam || !o) return { ok: false, reason: 'bad_official' };
+    if (fam.corruption[officialId]) return { ok: false, reason: 'owned' };
+    if (fam.cleanMoney < o.cost) return { ok: false, reason: 'no_money', cost: o.cost };
+    fam.cleanMoney -= o.cost; fam.corruption[officialId] = true;
+    if (fam.isPlayer) report(state, rng, 'corruption.bribe', { family: fam.name, name: o.name });
+    return { ok: true, level: corruptionLevel(fam) };
+  }
+
+  // İŞLETME SATIN ALMA — yeni aklama cephesi aç (temiz para ile)
+  function doBuyBusiness(state, rng, famId, typeId) {
+    const fam = state.families[famId]; const bt = data.businessTypes.find(t => t.id === typeId);
+    if (!fam || !bt) return { ok: false, reason: 'bad_type' };
+    if (fam.cleanMoney < bt.cost) return { ok: false, reason: 'no_money', cost: bt.cost };
+    fam.cleanMoney -= bt.cost;
+    const b = model.createBusiness(state, fam.id, bt);
+    state.businesses[b.id] = b; fam.businessIds.push(b.id);
+    return { ok: true, businessId: b.id };
+  }
+
   const crewSystem = new CrewSystem();
   const moleSystem = new MoleSystem();
   const diplomacySystem = new DiplomacySystem();
@@ -1176,12 +1393,16 @@
     espionage: (state, targetId) => withRng(state, rng => doEspionage(state, rng, playerFamily(state).id, targetId)),
     assassinate: (state, targetId) => withRng(state, rng => doAssassinate(state, rng, playerFamily(state).id, targetId)),
     territoryWar: (state, targetId, terrId) => withRng(state, rng => resolveBattle(state, rng, playerFamily(state).id, targetId, terrId)),
+    buyGood: (state, goodId, qty, city) => withRng(state, rng => doBuyGood(state, rng, playerFamily(state).id, goodId, qty, city)),
+    sellGood: (state, goodId, qty, city) => withRng(state, rng => doSellGood(state, rng, playerFamily(state).id, goodId, qty, city)),
+    bribe: (state, officialId) => withRng(state, rng => doBribe(state, rng, playerFamily(state).id, officialId)),
+    buyBusiness: (state, typeId) => withRng(state, rng => doBuyBusiness(state, rng, playerFamily(state).id, typeId)),
   };
 
   /* ----------------------------------------------------------------------
    * engine — tick orkestrasyonu (deterministik faz sırası)
    * -------------------------------------------------------------------- */
-  const PHASES = ['economy', 'crime', 'world', 'ai', 'psychology', 'crew', 'mole', 'diplomacy'];   // her tick (=1 ay)
+  const PHASES = ['market', 'economy', 'laundering', 'crime', 'world', 'ai', 'psychology', 'crew', 'mole', 'diplomacy', 'corruption'];   // her tick (=1 ay)
   const YEARLY = ['aging', 'rank', 'worldEconomyYear'];               // yılda bir
 
   function tick(state) {
@@ -1270,6 +1491,26 @@
         if (c.isMole == null) c.isMole = false;
         if (c.moleRisk == null) c.moleRisk = 0;
         if (c.suspicion == null) c.suspicion = 0;
+      });
+      return s;
+    },
+    // v3 → v4: kaçak ticaret envanteri, yozlaşma, piyasa malları, işletme alanları
+    4: s => {
+      if (!s.market) s.market = { goods: {}, trends: { policePressure: 0.2, economy: 0.5 } };
+      if (!s.market.trends) s.market.trends = { policePressure: 0.2, economy: 0.5 };
+      if (s.market.trends.economy == null) s.market.trends.economy = 0.5;
+      if (s.market.trends.policePressure == null) s.market.trends.policePressure = 0.2;
+      if (!s.market.goods) s.market.goods = {};
+      data.goods.forEach(g => { if (!s.market.goods[g.id]) s.market.goods[g.id] = { price: g.base, base: g.base, supply: 1, demand: 1, vol: g.vol }; });
+      Object.values(s.families || {}).forEach(f => {
+        if (!f.inventory) f.inventory = {};
+        if (!f.corruption) f.corruption = { mayor: false, prosecutor: false, policeChief: false, judge: false, minister: false };
+      });
+      Object.values(s.businesses || {}).forEach(b => {
+        const bt = data.businessTypes.find(t => t.id === b.type) || {};
+        if (b.staffCost == null) b.staffCost = bt.staff != null ? bt.staff : 200;
+        if (b.auditRisk == null) b.auditRisk = bt.audit != null ? bt.audit : 0.05;
+        if (b.efficiency == null) b.efficiency = bt.eff != null ? bt.eff : 0.82;
       });
       return s;
     },
@@ -1417,9 +1658,10 @@
     const v1env = JSON.stringify({ version: 1, checksum: '', state: '' });
     const v1state = { meta: { version: 1, seed: 1, createdAt: 0, saveName: 'x', nextId: 5 }, clock: { tick: 3, day: 10, year: 1 }, families: { f1: { id: 'f1', isPlayer: true, cleanMoney: 1, dirtyMoney: 0, reputation: 5, heat: 0, memberIds: ['c1'], territoryIds: [], businessIds: [], relations: {} } }, characters: { c1: { id: 'c1', familyId: 'f1', name: 'X', role: 'BOSS', stats: { combat: 40, cunning: 40, charisma: 40, loyalty: 40, management: 40 }, age: 30, health: 90, status: 'active', relations: {} } }, territories: {}, operations: {}, businesses: {}, market: { goods: {}, trends: {} }, world: { newsFeed: [] }, dynasty: { bossId: 'c1', history: [] }, eventLog: [], flags: {} };
     const migrated = persist.runMigrations(JSON.parse(JSON.stringify(v1state)));
-    check('Migration v1→v3 alanları doldurur', migrated.meta.version === 3 && migrated.clock.month === 1 &&
+    check('Migration v1→v4 alanları doldurur', migrated.meta.version === 4 && migrated.clock.month === 1 &&
       !!migrated.characters.c1.vitals && !!migrated.families.f1.school &&
-      migrated.families.f1.armedMen != null && migrated.characters.c1.job === 'none' && !!migrated.families.f1.relations);
+      migrated.families.f1.armedMen != null && migrated.characters.c1.job === 'none' && !!migrated.families.f1.relations &&
+      !!migrated.families.f1.inventory && !!migrated.families.f1.corruption && !!migrated.market.goods.weapon);
 
     // 15) 6 isimli rakip aile sabit kadro
     const s15 = createNewGame(1, { now: 1 });
@@ -1476,6 +1718,57 @@
     const fa = run(createNewGame(303, { now: 9 }), 24), fb = run(createNewGame(303, { now: 9 }), 24);
     check('Genişletilmiş tick determinizmi (8 faz)', JSON.stringify(fa) === JSON.stringify(fb));
 
+    // 24) Dinamik piyasa: fiyatlar dalgalanır
+    const mk = createNewGame(404, { now: 10 }); const p0 = mk.market.goods.cryptotape.price;
+    run(mk, 30); check('Piyasa fiyatı dalgalanır', mk.market.goods.cryptotape.price !== p0);
+
+    // 25) Kaçak ticaret: al/sat envanter + kirli para döngüsü
+    const tr = createNewGame(505, { now: 11 }); const pft = playerFamily(tr); pft.dirtyMoney = 200000; pft.heat = 0;
+    const buy = commands.buyGood(tr, 'art', 2);
+    check('Mal alımı envantere ekler', buy.ok && (playerFamily(tr).inventory.art || 0) === 2);
+    const sell = commands.sellGood(tr, 'art', 2);
+    check('Mal satışı stoğu düşürür', sell.ok && (playerFamily(tr).inventory.art || 0) === 0);
+
+    // 26) Kara para aklama kirli→temiz dönüştürür
+    const la = createNewGame(606, { now: 12 }); const pfl = playerFamily(la); pfl.dirtyMoney = 50000; pfl.cleanMoney = 0;
+    const dirty0 = pfl.dirtyMoney, clean0 = pfl.cleanMoney;
+    systems.laundering(la, util.makeRng(1));
+    check('Aklama kirli parayı azaltır', playerFamily(la).dirtyMoney < dirty0);
+    check('Aklama temiz parayı artırır', playerFamily(la).cleanMoney > clean0);
+
+    // 27) Siyasi yozlaşma: rüşvet figür satın alır, seviye yükselir
+    const co = createNewGame(707, { now: 13 }); playerFamily(co).cleanMoney = 500000;
+    const br = commands.bribe(co, 'policeChief');
+    check('Rüşvet figür satın alır', br.ok && playerFamily(co).corruption.policeChief === true && corruptionLevel(playerFamily(co)) > 0);
+
+    // 28) Yozlaşma aranma seviyesini (heat) bastırır
+    const hs = createNewGame(808, { now: 14 }); const pfh = playerFamily(hs); pfh.cleanMoney = 1000000; pfh.heat = 80;
+    commands.bribe(hs, 'minister'); commands.bribe(hs, 'policeChief');
+    const h0 = playerFamily(hs).heat; systems.corruption(hs, util.makeRng(2));
+    check('Yozlaşma ısıyı bastırır', playerFamily(hs).heat < h0);
+
+    // 29) Mahkeme: hakim/savcı ile dosya kapanır (tahliye)
+    const ct = createNewGame(909, { now: 15 }); const pfj = playerFamily(ct); pfj.cleanMoney = 1000000;
+    commands.bribe(ct, 'judge'); commands.bribe(ct, 'prosecutor');
+    const jm = familyMembers(ct, pfj).find(c => c.role !== 'BOSS'); jm.status = 'jailed';
+    let released = false; const rngc = util.makeRng(5);
+    for (let i = 0; i < 200 && !released; i++) { systems.corruption(ct, rngc); if (jm.status === 'active') released = true; }
+    check('Yozlaşma ile tahliye mümkün', released);
+
+    // 30) İşletme satın alma yeni aklama cephesi açar
+    const biz = createNewGame(111, { now: 16 }); const pfz = playerFamily(biz); pfz.cleanMoney = 200000;
+    const nb0 = pfz.businessIds.length, bres = commands.buyBusiness(biz, 'casino');
+    check('İşletme satın alma çalışır', bres.ok && playerFamily(biz).businessIds.length === nb0 + 1);
+
+    // 31) Makro ekonomi olayı trendi değiştirir
+    const mac = createNewGame(222, { now: 17 }); const e0 = mac.market.trends.economy;
+    let changed = false; for (let i = 0; i < 8 && !changed; i++) { engine.advanceYear(mac); if (mac.market.trends.economy !== e0) changed = true; }
+    check('Makro olay ekonomiyi değiştirir', changed);
+
+    // 32) Genişletilmiş tick (11 faz) deterministik
+    const ea = run(createNewGame(333, { now: 18 }), 24), eb = run(createNewGame(333, { now: 18 }), 24);
+    check('11 fazlı tick determinizmi', JSON.stringify(ea) === JSON.stringify(eb));
+
     const passed = results.filter(r => r.ok).length;
     const total = results.length;
     const log = (typeof console !== 'undefined') ? console : { log: () => {} };
@@ -1488,11 +1781,11 @@
    * Public API
    * -------------------------------------------------------------------- */
   root.AHTAPOT = {
-    version: '0.4-crew-mole-diplomacy',
+    version: '0.5-economy-trade-laundering-corruption',
     util, rules, data, model,
     state: {
       createNewGame, applyStartChoice, CURRENT_VERSION, playerFamily,
-      helpers: { familyMembers, busyCrew, totalMoney, schoolMod, rankFor, rankName, crewAttrs, crewLimit, jobName, familyPower, avgLoyalty, relationOf, alliesOf, isEmbargoed },
+      helpers: { familyMembers, busyCrew, totalMoney, schoolMod, rankFor, rankName, crewAttrs, crewLimit, jobName, familyPower, avgLoyalty, relationOf, alliesOf, isEmbargoed, corruptionLevel, cityFactor, catFactor },
     },
     story, systems, engine, persist, events, commands,
     crewSystem, moleSystem, diplomacySystem,
@@ -1522,18 +1815,27 @@
   for (let i = 0; i < 5; i++) A.engine.advanceYear(g);
 
   const fam = A.state.playerFamily(g);
+  // demo: bir mal alıp satarak ticaret döngüsünü göster (kirli para gerektirir)
+  A.commands.buyGood(g, 'cryptotape', 3);
+  A.commands.sellGood(g, 'cryptotape', 3, A.data.citiesByCountry[fam.country][0]);
+  if (fam.cleanMoney >= 50000) A.commands.bribe(g, 'mayor');  // demo: yeterliyse rüşvet
+
   const boss = g.characters[g.dynasty.bossId];
   const school = A.data.schools.find(s => s.id === fam.school).name;
   const wars = Object.values(fam.relations).filter(r => r.treaty === 'war').length;
   const allies = A.state.helpers.alliesOf(g, fam.id).length;
+  const corr = A.state.helpers.corruptionLevel(fam);
+  const econ = (g.market.trends.economy * 100).toFixed(0);
+  const cryptoP = g.market.goods.cryptotape.price;
   statusEl.innerHTML =
     'Self-test: <span class="' + (test.ok ? 'ok">' : 'err">') + test.passed + '/' + test.total + '</span> &nbsp;|&nbsp; ' +
     'Çekirdek <code>v' + A.version + '</code> hazır.<br>' +
     boss.name + ' · <code>' + boss.age + '</code> yaş · <code>' + fam.country + '/' + fam.city + '</code> · Ekol: <code>' + school + '</code><br>' +
     'Rütbe: <code>' + A.state.helpers.rankName(fam.rank) + '</code> · Yıl <code>' + g.clock.year + '</code> · Ay <code>' + g.clock.month + '</code><br>' +
-    'Temiz <code>' + fam.cleanMoney + '₺</code> · Kirli <code>' + fam.dirtyMoney + '₺</code> · Isı <code>' + fam.heat.toFixed(0) + '</code> · Paranoya <code>' + boss.vitals.paranoia.toFixed(0) + '</code><br>' +
-    'Sağlık <code>' + boss.attributes.health.toFixed(0) + '</code> · Bölge <code>' + fam.territoryIds.length + '</code> · Üye <code>' + fam.memberIds.filter(id => g.characters[id] && g.characters[id].status === 'active').length + '</code><br>' +
-    'Silahlı adam <code>' + fam.armedMen + '</code> · Güç <code>' + A.state.helpers.familyPower(g, fam) + '</code> · Savaş <code>' + wars + '</code> · İttifak <code>' + allies + '</code> · Rakip <code>' + (Object.keys(g.families).length - 1) + '</code>';
+    'Temiz <code>' + fam.cleanMoney + '₺</code> · Kirli <code>' + fam.dirtyMoney + '₺</code> · Isı <code>' + fam.heat.toFixed(0) + '</code> · Yozlaşma <code>' + corr + '</code> · Paranoya <code>' + boss.vitals.paranoia.toFixed(0) + '</code><br>' +
+    'Sağlık <code>' + boss.attributes.health.toFixed(0) + '</code> · Bölge <code>' + fam.territoryIds.length + '</code> · İşletme <code>' + fam.businessIds.length + '</code> · Üye <code>' + fam.memberIds.filter(id => g.characters[id] && g.characters[id].status === 'active').length + '</code><br>' +
+    'Silahlı adam <code>' + fam.armedMen + '</code> · Güç <code>' + A.state.helpers.familyPower(g, fam) + '</code> · Savaş <code>' + wars + '</code> · İttifak <code>' + allies + '</code><br>' +
+    'Ekonomi endeksi <code>' + econ + '</code> · Kripto Kaset fiyatı <code>' + cryptoP + '₺</code> · Rakip <code>' + (Object.keys(g.families).length - 1) + '</code>';
 
   newsEl.innerHTML = g.world.newsFeed.slice(0, 22).map(n => '<div>[Y' + Math.ceil((n.tick + 1) / 12) + '] ' + n.text + '</div>').join('') || '<div>Henüz haber yok…</div>';
 })();
