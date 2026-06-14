@@ -36,7 +36,7 @@
 </head>
 <body>
   <h1>AHTAPOT</h1>
-  <div class="sub">Suç Hanedanlığı & Mafya Yaşam Simülasyonu — <b>Modül: Karakter · Ekol · Rütbe · Psikoloji · Yıllık Döngü (UI yok)</b></div>
+  <div class="sub">Suç Hanedanlığı & Mafya Yaşam Simülasyonu — <b>Modül: Ekip · Köstebek · Diplomasi & Çete Savaşları (UI yok)</b></div>
 
   <div class="card">
     <h2>Durum</h2>
@@ -56,6 +56,9 @@
       <code>const g = AHTAPOT.state.createNewGame(123)</code> — yeni oyun (14 yaş)<br />
       <code>AHTAPOT.state.applyStartChoice(g, 'rob')</code> — başlangıç kararı (rob/police/gang)<br />
       <code>AHTAPOT.engine.advanceYear(g)</code> — +1 yıl simüle et<br />
+      <code>AHTAPOT.commands.hire(g, {job:'lawyer'})</code> — ekibe avukat al<br />
+      <code>AHTAPOT.commands.declareWar(g, rivalId)</code> / <code>territoryWar</code> / <code>espionage</code> / <code>assassinate</code><br />
+      <code>AHTAPOT.commands.surveil(g, charId)</code> / <code>interrogate</code> / <code>loyaltyTest</code> / <code>silence</code> (köstebek)<br />
       <code>AHTAPOT.persist.save('slot1', g)</code> / <code>AHTAPOT.persist.load('slot1')</code>
     </div>
   </div>
@@ -136,6 +139,21 @@
     healthDeclineAge: 50,         // bu yaştan sonra sağlık düşüşü hızlanır
     paranoiaHallucThreshold: 70,  // bu üstünde halüsinasyon/sahte ihanet riski
     paranoiaHallucChance: 0.12,
+    // --- Ekip sistemi ---
+    crewLimitBase: 8,             // rütbe 0'da ekip limiti (başlangıç 5 üyenin üstünde marj)
+    crewLimitPerRank: 2,          // her rütbe +2 üye
+    jobSalary: { none: 0, accountant: 400, hitman: 350, bodyguard: 300, lawyer: 600, spy: 450, ops_chief: 700 },
+    hireCostBase: 1500,           // işe alım maliyeti (rütbeyle artar)
+    // --- Köstebek sistemi ---
+    moleRiskGrowth: 0.8,          // tick başına temel köstebek riski büyümesi (düşük sadakatte)
+    moleConvertThreshold: 60,     // bu riskin üstünde köstebek olma RNG kontrolü
+    moleActChance: 0.25,          // köstebek aktif olduğunda eylem yapma şansı
+    surveilCost: 800, loyaltyTestCost: 1200,  // oyuncu eylem maliyetleri
+    // --- Diplomasi & savaş ---
+    warBattleChancePerTick: 0.35, // savaştaki aileler arası tick başına çatışma şansı
+    warLuckSpread: 0.15,          // şans faktörü genişliği (deterministik rng)
+    aiDiploChance: 0.08,          // AI'ın tick başına diplomatik hamle şansı
+    embargoIncomePenalty: 0.25,   // ambargo altındaki ailenin ticaret/gelir cezası
   };
 
   /* ----------------------------------------------------------------------
@@ -175,6 +193,25 @@
       { id: 6, name: 'Godfather', minRep: 82, minWealth: 3000000 },
       { id: 7, name: 'Shadow Emperor', minRep: 92, minWealth: 15000000 },
     ],
+    // Ekip pozisyonları — her biri pasif bir aile etkisi sağlar
+    jobs: [
+      { id: 'accountant', name: 'Muhasebeci', perk: 'launder' },     // aklama verimi
+      { id: 'hitman', name: 'Tetikçi', perk: 'combat' },             // silahlı güç
+      { id: 'bodyguard', name: 'Koruma', perk: 'defense' },          // patron savunması
+      { id: 'lawyer', name: 'Avukat', perk: 'legal' },               // tutuklama/ceza azaltma
+      { id: 'spy', name: 'Casus', perk: 'intel' },                   // casusluk başarısı
+      { id: 'ops_chief', name: 'Operasyon Şefi', perk: 'ops' },      // operasyon başarısı
+    ],
+    // 6 isimli rakip aile (sabit) — tam ad + ekol + arketip
+    rivalFamilies: [
+      { full: 'Romano Family', school: 'italian', archetype: 'schemer' },
+      { full: 'Volkov Bratva', school: 'bratva', archetype: 'aggressor' },
+      { full: 'Crimson Triad', school: 'triad', archetype: 'merchant' },
+      { full: 'Los Santos Cartel', school: 'cartel', archetype: 'aggressor' },
+      { full: 'Black Lotus', school: 'triad', archetype: 'schemer' },
+      { full: 'Iron Syndicate', school: 'bratva', archetype: 'turtle' },
+    ],
+    treaties: ['peace', 'ceasefire', 'alliance', 'war', 'embargo'],
     countries: ['Türkiye', 'İtalya', 'Rusya', 'Kolombiya', 'Japonya', 'A.B.D.'],
     citiesByCountry: {
       'Türkiye': ['İstanbul', 'İzmir', 'Mersin'],
@@ -233,6 +270,55 @@
       'startChoice': [
         '{text}',
       ],
+      'hire': [
+        '{name} aileye {job} olarak katıldı.',
+        '{family} kadrosuna yeni bir {job} aldı: {name}.',
+      ],
+      'mole.tip': [
+        'Sızıntı! {name} polise bilgi sızdırdı; {family} üzerinde baskı arttı.',
+      ],
+      'mole.theft': [
+        'Kasadan {amount}₺ buharlaştı. İçeride bir köstebek var...',
+      ],
+      'mole.betray': [
+        '{name}, {rival} ile gizlice anlaştı; {family}\'nin sırları sızdı.',
+      ],
+      'mole.hit': [
+        'Suikast girişimi! {name} patrona pusu kurdu.',
+        '{name} ihanet etti ve {boss}\'a silah çekti.',
+      ],
+      'mole.exposed': [
+        'Köstebek ortaya çıktı: {name} deşifre oldu.',
+      ],
+      'silence': [
+        '{name} susturuldu. Sokak mesajı aldı.',
+        '{family} bir hain ile hesaplaştı: {name} ortadan kayboldu.',
+      ],
+      'silence.innocent': [
+        '{name} infaz edildi... ama masumdu. Ekip tedirgin, sadakat sarsıldı.',
+      ],
+      'war.declare': [
+        'Savaş ilanı: {family}, {rival} ailesine savaş açtı.',
+      ],
+      'war.battle': [
+        '{winner}, {loser} ile çatışmada üstün geldi; {district} el değiştirdi.',
+        'Kanlı çatışma: {winner} {loser}\'ı geri püskürttü.',
+      ],
+      'war.end': [
+        '{family} ile {rival} arasında ateşkes sağlandı.',
+      ],
+      'alliance': [
+        '{family} ile {rival} ittifak kurdu.',
+      ],
+      'embargo': [
+        '{family}, {rival} ailesine ambargo uyguladı; ticaret kanları kesildi.',
+      ],
+      'espionage': [
+        '{family}\'nin casusu {rival} içine sızdı: {result}',
+      ],
+      'assassination': [
+        'Suikast: {family}, {rival} saflarından {name} adlı ismi devirdi.',
+      ],
     },
   };
 
@@ -258,6 +344,14 @@
         psyche: { conscience: rng.int(20, 70), trauma: 0, stress: rng.int(10, 40), addiction: 0 },
         // operasyon/işletme becerileri (skills tek kaynaktır)
         skills: { combat: stat(), cunning: stat(), charisma: stat(), loyalty: stat(), management: stat(), hacking: rng.int(1, 30) },
+        // ekip öznitelikleri (Sadakat=skills.loyalty, Zeka=attributes.intelligence)
+        courage: rng.int(20, 80),       // Cesaret
+        greed: rng.int(10, 75),         // Açgözlülük
+        job: 'none',                    // ekip pozisyonu (data.jobs)
+        // köstebek sistemi (gizli durum)
+        isMole: false,
+        moleRisk: 0,                    // arka planda büyür (düşük sadakat + açgözlülük)
+        suspicion: 0,                   // oyuncunun bildiği şüphe düzeyi (takip/sorgu açar)
         traits: [],
         age: rng.int(role === 'BOSS' ? 40 : 22, role === 'BOSS' ? 62 : 45),
         health: 100,
@@ -290,13 +384,14 @@
         heat: 0,
       };
     },
-    createFamily(state, rng, name, isPlayer, school) {
+    createFamily(state, rng, name, isPlayer, school, fullName) {
       const country = rng.pick(data.countries);
       return {
         id: nextId(state, 'f'),
-        name: name + ' Ailesi',
+        name: fullName || (name + ' Ailesi'),
         isPlayer,
         school: (school || rng.pick(data.schools)).id,   // suç ekolü
+        archetype: null,                                  // AI arketipi (aiProfile ile senkron)
         rank: 0,                                          // rütbe indeksi (data.ranks)
         country,
         city: rng.pick(data.citiesByCountry[country]),
@@ -304,10 +399,11 @@
         dirtyMoney: isPlayer ? rules.start.dirty : rng.int(0, 3000),
         reputation: rng.int(10, 40),
         heat: 0,
+        armedMen: isPlayer ? 3 : rng.int(6, 18),          // Silahlı Adam Sayısı
         memberIds: [],
         territoryIds: [],
         businessIds: [],
-        relations: {},
+        relations: {},                                    // diğer ailelerle ilişki (createNewGame doldurur)
         aiProfile: isPlayer ? null : {
           archetype: rng.pick(data.archetypes),
           aggression: rng.next(), greed: rng.next(), caution: rng.next(), vengeance: rng.next(),
@@ -337,7 +433,7 @@
   /* ----------------------------------------------------------------------
    * state — yeni oyun kurulumu (deterministik, seed'e bağlı)
    * -------------------------------------------------------------------- */
-  const CURRENT_VERSION = 2;
+  const CURRENT_VERSION = 3;
 
   function createNewGame(seed, opts) {
     opts = opts || {};
@@ -391,10 +487,12 @@
     }
     applySchoolLoyalty(state, player);    // ekol sadakat bonusu (örn. Yakuza +25)
 
-    // --- AI rakip aileler ---
-    const aiNames = data.familyNames.filter(n => n + ' Ailesi' !== player.name);
-    for (let i = 0; i < rules.aiFamilyCount; i++) {
-      const fam = model.createFamily(state, rng, rng.pick(aiNames), false);
+    // --- 6 isimli rakip aile (sabit kadro) ---
+    data.rivalFamilies.forEach(rf => {
+      const sc = data.schools.find(s => s.id === rf.school);
+      const fam = model.createFamily(state, rng, null, false, sc, rf.full);
+      fam.archetype = rf.archetype;
+      if (fam.aiProfile) fam.aiProfile.archetype = rf.archetype;
       state.families[fam.id] = fam;
       const bossA = model.createCharacter(state, rng, fam.id, 'BOSS');
       state.characters[bossA.id] = bossA;
@@ -406,7 +504,7 @@
         fam.memberIds.push(c.id);
       }
       applySchoolLoyalty(state, fam);
-    }
+    });
 
     // --- Bölge sahipliği dağıt: oyuncu + AI + bir kısmı tarafsız ---
     const fams = Object.values(state.families);
@@ -427,6 +525,15 @@
       const b = model.createBusiness(state, player.id, bt);
       state.businesses[b.id] = b;
       player.businessIds.push(b.id);
+    });
+
+    // --- Aileler arası ilişki ağı (başlangıçta barış, hafif rastgele standing) ---
+    const allFams = Object.values(state.families);
+    allFams.forEach(a => {
+      allFams.forEach(b => {
+        if (a.id === b.id) return;
+        a.relations[b.id] = { standing: rng.int(-20, 20), treaty: 'peace' };
+      });
     });
 
     // --- Dynasty ilk bölümü ---
@@ -516,6 +623,38 @@
     return r;
   }
   function rankName(idx) { return (data.ranks[idx] || data.ranks[0]).name; }
+  // Ekip öznitelikleri görünümü (Sadakat/Cesaret/Açgözlülük/Zeka)
+  function crewAttrs(c) {
+    return { loyalty: c.skills.loyalty, courage: c.courage, greed: c.greed, intelligence: c.attributes.intelligence };
+  }
+  function crewLimit(fam) { return rules.crewLimitBase + fam.rank * rules.crewLimitPerRank; }
+  function jobName(id) { const j = data.jobs.find(x => x.id === id); return j ? j.name : '—'; }
+  function membersWithPerk(state, fam, perk) {
+    return familyMembers(state, fam).filter(c => c.status === 'active' && data.jobs.some(j => j.id === c.job && j.perk === perk));
+  }
+  // Aile gücü (deterministik): silahlı adam × ortalama dövüş + topraklar + rütbe
+  function familyPower(state, fam) {
+    const combatMembers = familyMembers(state, fam).filter(c => c.status === 'active');
+    const avgCombat = util.avg(combatMembers.map(c => c.skills.combat)) || 30;
+    const violence = schoolMod(fam, 'violenceMult', 1);
+    return Math.round((fam.armedMen * (avgCombat / 50) + fam.territoryIds.length * 6 + fam.rank * 8) * violence);
+  }
+  function avgLoyalty(state, fam) { const m = familyMembers(state, fam).filter(c => c.status === 'active'); return Math.round(util.avg(m.map(c => c.skills.loyalty)) || 0); }
+  // İlişki erişim/ayar (çift yönlü tutulur)
+  function relationOf(fam, otherId) { return fam.relations[otherId] || (fam.relations[otherId] = { standing: 0, treaty: 'peace' }); }
+  function setTreaty(state, aId, bId, treaty) {
+    const a = state.families[aId], b = state.families[bId];
+    if (!a || !b) return;
+    relationOf(a, bId).treaty = treaty; relationOf(b, aId).treaty = treaty;
+  }
+  function adjustStanding(state, aId, bId, delta) {
+    const a = state.families[aId], b = state.families[bId];
+    if (!a || !b) return;
+    const ra = relationOf(a, bId), rb = relationOf(b, aId);
+    ra.standing = util.clamp(ra.standing + delta, -100, 100);
+    rb.standing = util.clamp(rb.standing + delta, -100, 100);
+  }
+  function areAtWar(fam, otherId) { return relationOf(fam, otherId).treaty === 'war'; }
 
   /* ----------------------------------------------------------------------
    * story — procedural anlatı motoru (şablon + ikame)
@@ -558,12 +697,14 @@
         haraç = Math.round(haraç * schoolMod(fam, 'dirtyIncomeMult', 1));  // Kartel +30% vb.
         fam.dirtyMoney += haraç;
 
-        // İşletme geliri → temiz para
+        // İşletme geliri → temiz para (ambargo altındaysa düşer)
         let clean = 0, launderCap = 0;
         fam.businessIds.forEach(bid => {
           const b = state.businesses[bid];
           if (!b) return; clean += b.income; launderCap += b.launderCapacity;
         });
+        if (isEmbargoed(fam)) clean = Math.round(clean * (1 - rules.embargoIncomePenalty));
+        launderCap = Math.round(launderCap * (1 + 0.2 * membersWithPerk(state, fam, 'launder').length)); // Muhasebeci aklamayı artırır
         fam.cleanMoney += clean;
 
         // Kara para aklama (kapasite kadar, ekole göre değişen kesintiyle)
@@ -758,9 +899,289 @@
   }
 
   /* ----------------------------------------------------------------------
+   * Ekip / Köstebek / Diplomasi — OOP sistem sınıfları + savaş formülleri
+   * -------------------------------------------------------------------- */
+  // Oyuncu komutlarını deterministik rng ile sarmalar (state.rngState ilerletir)
+  function withRng(state, fn) { const rng = util.makeRng(state.rngState); const res = fn(rng); state.rngState = rng.state; return res; }
+  function isEmbargoed(fam) { return Object.values(fam.relations).some(r => r.treaty === 'embargo'); }
+  function alliesOf(state, famId) {
+    const fam = state.families[famId]; if (!fam) return [];
+    return Object.keys(fam.relations).filter(id => fam.relations[id].treaty === 'alliance').map(id => state.families[id]).filter(Boolean);
+  }
+
+  // EKİP SİSTEMİ — işe alım, kovma, pozisyon atama, silahlı güç senkronu
+  class CrewSystem {
+    update(state) {
+      const pf = playerFamily(state); if (!pf) return;
+      const active = familyMembers(state, pf).filter(c => c.status === 'active');
+      const hit = active.filter(c => c.job === 'hitman').length;
+      pf.armedMen = 2 + active.length + hit;   // tetikçiler silahlı gücü artırır
+    }
+    hire(state, rng, familyId, opts) {
+      opts = opts || {};
+      const fam = state.families[familyId]; if (!fam) return { ok: false, reason: 'no_family' };
+      const active = familyMembers(state, fam).filter(c => c.status === 'active');
+      if (active.length >= crewLimit(fam)) return { ok: false, reason: 'limit', limit: crewLimit(fam) };
+      const cost = Math.round(rules.hireCostBase * (1 + fam.rank * 0.5));
+      if (totalMoney(fam) < cost) return { ok: false, reason: 'no_money', cost };
+      payFrom(fam, cost);
+      const c = model.createCharacter(state, rng, fam.id, 'ASSOCIATE');
+      c.job = (opts.job && data.jobs.some(j => j.id === opts.job)) ? opts.job : 'none';
+      state.characters[c.id] = c; fam.memberIds.push(c.id);
+      report(state, rng, 'hire', { name: c.name, family: fam.name, job: jobName(c.job) });
+      return { ok: true, memberId: c.id, cost };
+    }
+    fire(state, rng, familyId, charId) {
+      const fam = state.families[familyId], c = state.characters[charId];
+      if (!fam || !c || c.familyId !== familyId) return { ok: false };
+      if (c.role === 'BOSS') return { ok: false, reason: 'boss' };
+      fam.memberIds = fam.memberIds.filter(id => id !== charId);
+      c.familyId = null; c.status = 'dismissed';
+      return { ok: true };
+    }
+    assignJob(state, charId, jobId) {
+      const c = state.characters[charId]; if (!c) return { ok: false };
+      if (jobId !== 'none' && !data.jobs.some(j => j.id === jobId)) return { ok: false, reason: 'bad_job' };
+      c.job = jobId; return { ok: true };
+    }
+  }
+
+  // KÖSTEBEK SİSTEMİ — arka plan risk büyümesi, ihanet eylemleri, oyuncu karşı-eylemleri
+  class MoleSystem {
+    update(state, rng) {
+      Object.values(state.characters).forEach(c => {
+        if (c.status !== 'active' || c.role === 'BOSS') return;
+        const loyaltyFactor = util.clamp((60 - c.skills.loyalty) / 60, 0, 1);
+        if (loyaltyFactor <= 0) { c.moleRisk = Math.max(0, c.moleRisk - 1); return; }
+        const greedF = c.greed / 100, stressF = 0.5 + c.psyche.stress / 200;
+        c.moleRisk = util.clamp(c.moleRisk + rules.moleRiskGrowth * loyaltyFactor * (0.5 + greedF) * stressF, 0, 100);
+        if (!c.isMole && c.moleRisk >= rules.moleConvertThreshold && rng.chance(0.12)) c.isMole = true;
+      });
+      Object.values(state.characters).forEach(c => {
+        if (!c.isMole || c.status !== 'active') return;
+        if (!rng.chance(rules.moleActChance)) return;
+        const fam = state.families[c.familyId]; if (fam) moleAct(state, rng, fam, c);
+      });
+    }
+    surveil(state, rng, charId) {
+      const c = state.characters[charId], pf = playerFamily(state); if (!c || !pf) return { ok: false };
+      if (totalMoney(pf) < rules.surveilCost) return { ok: false, reason: 'no_money' };
+      payFrom(pf, rules.surveilCost);
+      c.suspicion = util.clamp(Math.round(c.moleRisk + (rng.next() - 0.5) * 20), 0, 100); // gürültülü ölçüm
+      return { ok: true, suspicion: c.suspicion, hint: c.suspicion > 55 ? 'şüpheli davranışlar' : 'şimdilik temiz' };
+    }
+    interrogate(state, rng, charId) {
+      const c = state.characters[charId], boss = state.characters[state.dynasty.bossId]; if (!c) return { ok: false };
+      c.attributes.happiness = util.clamp(c.attributes.happiness - 10, 0, 100);
+      c.skills.loyalty = util.clamp(c.skills.loyalty - 5, 1, 100);
+      const exposeChance = util.clamp(0.3 + (boss ? boss.skills.cunning / 200 : 0) + c.moleRisk / 200, 0, 0.95);
+      if (c.isMole && rng.next() < exposeChance) { c.suspicion = 100; report(state, rng, 'mole.exposed', { name: c.name }); return { ok: true, exposed: true }; }
+      if (!c.isMole && boss && boss.vitals.paranoia > 60 && rng.chance(0.25)) return { ok: true, exposed: false, falseAlarm: true };
+      return { ok: true, exposed: false };
+    }
+    loyaltyTest(state, rng, charId) {
+      const c = state.characters[charId], pf = playerFamily(state); if (!c || !pf) return { ok: false };
+      if (totalMoney(pf) < rules.loyaltyTestCost) return { ok: false, reason: 'no_money' };
+      payFrom(pf, rules.loyaltyTestCost);
+      if (c.isMole) { const caught = rng.next() < 0.6; if (caught) { c.suspicion = 100; report(state, rng, 'mole.exposed', { name: c.name }); return { ok: true, exposed: true }; } return { ok: true, exposed: false }; }
+      c.skills.loyalty = util.clamp(c.skills.loyalty + 8, 1, 100); c.suspicion = Math.max(0, c.suspicion - 20);
+      return { ok: true, loyal: true };
+    }
+    silence(state, rng, charId) {
+      const c = state.characters[charId], pf = state.families[c && c.familyId]; if (!c || !pf) return { ok: false };
+      if (c.role === 'BOSS') return { ok: false, reason: 'boss' };
+      const wasMole = c.isMole;
+      c.status = 'dead'; c.isMole = false;
+      pf.heat = util.clamp(pf.heat + 10, 0, 100);
+      const boss = state.characters[state.dynasty.bossId]; if (boss) boss.psyche.trauma = util.clamp(boss.psyche.trauma + 8, 0, 100);
+      familyMembers(state, pf).filter(o => o.status === 'active').forEach(o => { o.skills.loyalty = util.clamp(o.skills.loyalty + (wasMole ? 3 : -6), 1, 100); });
+      if (wasMole) { if (pf.isPlayer) report(state, rng, 'silence', { name: c.name, family: pf.name }); }
+      else { pf.reputation = util.clamp(pf.reputation - 4, 0, 100); if (pf.isPlayer) report(state, rng, 'silence.innocent', { name: c.name }); }
+      return { ok: true, wasMole };
+    }
+  }
+
+  function moleAct(state, rng, fam, c) {
+    const boss = state.characters[state.dynasty.bossId];
+    const r = rng.next();
+    if (r < 0.35) {                                   // polise ihbar
+      fam.heat = util.clamp(fam.heat + 12, 0, 100); c.suspicion = Math.min(100, c.suspicion + 8);
+      if (fam.isPlayer) report(state, rng, 'mole.tip', { family: fam.name, name: c.name });
+    } else if (r < 0.65) {                            // kasadan hırsızlık
+      const steal = Math.min(fam.dirtyMoney, Math.round(500 + c.greed * 30));
+      if (steal > 0) { fam.dirtyMoney -= steal; if (fam.isPlayer) report(state, rng, 'mole.theft', { amount: steal }); }
+    } else if (r < 0.85) {                            // rakibe ihanet
+      const rivals = Object.values(state.families).filter(f => f.id !== fam.id);
+      if (rivals.length) { const rv = rng.pick(rivals); adjustStanding(state, fam.id, rv.id, -8); if (fam.isPlayer) report(state, rng, 'mole.betray', { name: c.name, family: fam.name, rival: rv.name }); }
+    } else {                                          // patrona suikast girişimi
+      if (boss && boss.status === 'active') {
+        const guards = membersWithPerk(state, fam, 'defense');
+        const defense = 0.4 + guards.length * 0.2;
+        const atk = 0.3 + c.courage / 200 + c.skills.combat / 200;
+        if (rng.next() < util.clamp(atk - defense, 0.03, 0.8)) {
+          boss.attributes.health = util.clamp(boss.attributes.health - 50, 0, 100); boss.health = boss.attributes.health;
+          if (boss.attributes.health <= 0) { boss.status = 'dead'; state.flags.successionPending = 1; }
+        }
+        c.suspicion = 100;
+        if (fam.isPlayer) report(state, rng, 'mole.hit', { name: c.name, boss: boss.name });
+      }
+    }
+  }
+
+  // DİPLOMASİ & ÇETE SAVAŞLARI — AI hamleleri + savaş çözümü + oyuncu eylemleri
+  class DiplomacySystem {
+    update(state, rng) { this.aiActions(state, rng); this.resolveWars(state, rng); }
+    aiActions(state, rng) {
+      Object.values(state.families).forEach(fam => {
+        if (!fam.aiProfile) return;
+        const p = fam.aiProfile;
+        if (!rng.chance(rules.aiDiploChance + p.aggression * 0.06)) return;
+        const others = Object.values(state.families).filter(f => f.id !== fam.id);
+        if (!others.length) return;
+        others.sort((a, b) => relationOf(fam, a.id).standing - relationOf(fam, b.id).standing);
+        const target = others[0], rel = relationOf(fam, target.id);
+        if (rel.treaty === 'alliance') return;
+        if (rel.standing < -40 && p.aggression > 0.5 && rel.treaty !== 'war') this.declareWar(state, rng, fam.id, target.id);
+        else if (rel.standing > 40 && p.caution > 0.5 && rel.treaty === 'peace') { setTreaty(state, fam.id, target.id, 'alliance'); if (target.isPlayer || fam.isPlayer) report(state, rng, 'alliance', { family: fam.name, rival: target.name }); }
+        else if (p.greed > 0.6 && rel.treaty === 'peace') { setTreaty(state, fam.id, target.id, 'embargo'); if (target.isPlayer) report(state, rng, 'embargo', { family: fam.name, rival: target.name }); }
+        else doEspionage(state, rng, fam.id, target.id);
+      });
+    }
+    resolveWars(state, rng) {
+      const fams = Object.values(state.families), done = {};
+      fams.forEach(a => {
+        Object.keys(a.relations).forEach(bId => {
+          if (a.relations[bId].treaty !== 'war') return;
+          const key = [a.id, bId].sort().join('|'); if (done[key]) return; done[key] = 1;
+          if (state.families[bId] && rng.chance(rules.warBattleChancePerTick)) resolveBattle(state, rng, a.id, bId);
+        });
+      });
+    }
+    declareWar(state, rng, aId, bId) {
+      setTreaty(state, aId, bId, 'war'); adjustStanding(state, aId, bId, -20);
+      const a = state.families[aId], b = state.families[bId];
+      if (a && b && (a.isPlayer || b.isPlayer)) report(state, rng, 'war.declare', { family: a.name, rival: b.name });
+      return { ok: true };
+    }
+    ceasefire(state, rng, aId, bId) {
+      setTreaty(state, aId, bId, 'ceasefire'); adjustStanding(state, aId, bId, 12);
+      const a = state.families[aId], b = state.families[bId];
+      if (a && b && (a.isPlayer || b.isPlayer)) report(state, rng, 'war.end', { family: a.name, rival: b.name });
+      return { ok: true };
+    }
+    proposeAlliance(state, rng, aId, bId) {
+      const rel = relationOf(state.families[aId], bId);
+      if (rel.standing < 25) return { ok: false, reason: 'standing_low', standing: rel.standing };
+      setTreaty(state, aId, bId, 'alliance');
+      const a = state.families[aId], b = state.families[bId];
+      if (a.isPlayer || b.isPlayer) report(state, rng, 'alliance', { family: a.name, rival: b.name });
+      return { ok: true };
+    }
+    improveRelations(state, rng, aId, bId) {
+      const a = state.families[aId]; if (!a) return { ok: false };
+      const cost = 5000;
+      if (totalMoney(a) < cost) return { ok: false, reason: 'no_money', cost };
+      payFrom(a, cost); adjustStanding(state, aId, bId, 12);
+      return { ok: true, standing: relationOf(a, bId).standing };
+    }
+    embargo(state, rng, aId, bId) {
+      setTreaty(state, aId, bId, 'embargo'); adjustStanding(state, aId, bId, -8);
+      const a = state.families[aId], b = state.families[bId];
+      if (a.isPlayer || b.isPlayer) report(state, rng, 'embargo', { family: a.name, rival: b.name });
+      return { ok: true };
+    }
+  }
+
+  // Deterministik savaş çözümü: güç dengesi + şans faktörü
+  function resolveBattle(state, rng, attackerId, defenderId, targetTerritoryId) {
+    const A = state.families[attackerId], D = state.families[defenderId]; if (!A || !D) return null;
+    let target = targetTerritoryId ? state.territories[targetTerritoryId] : null;
+    if (!target) { const tts = D.territoryIds.map(id => state.territories[id]).filter(Boolean); target = tts.length ? rng.pick(tts) : null; }
+    let ap = familyPower(state, A) * schoolMod(A, 'captureMult', 1);
+    let dp = familyPower(state, D) + (target ? target.defense : 0);
+    alliesOf(state, A.id).forEach(al => { ap += familyPower(state, al) * 0.25; });
+    alliesOf(state, D.id).forEach(al => { dp += familyPower(state, al) * 0.25; });
+    let score = ap / (ap + dp);
+    score = util.clamp(score + (rng.next() - 0.5) * 2 * rules.warLuckSpread, 0.03, 0.97);
+    const win = rng.next() < score;
+    const winner = win ? A : D, loser = win ? D : A;
+    loser.armedMen = Math.max(0, loser.armedMen - rng.int(1, 4));
+    winner.armedMen = Math.max(0, winner.armedMen - rng.int(0, 2));
+    loser.heat = util.clamp(loser.heat + 6, 0, 100); winner.heat = util.clamp(winner.heat + 8, 0, 100);
+    let captured = null;
+    if (win && target && target.ownerId === D.id) {
+      D.territoryIds = D.territoryIds.filter(id => id !== target.id);
+      target.ownerId = A.id; A.territoryIds.push(target.id); captured = target.id;
+    }
+    if (A.isPlayer || D.isPlayer) report(state, rng, 'war.battle', { winner: winner.name, loser: loser.name, district: target ? target.name : 'sınır' });
+    if (loser.armedMen <= 2 || rng.chance(0.12)) {
+      setTreaty(state, A.id, D.id, 'ceasefire'); adjustStanding(state, A.id, D.id, 8);
+      if (A.isPlayer || D.isPlayer) report(state, rng, 'war.end', { family: A.name, rival: D.name });
+    }
+    return { winnerId: winner.id, loserId: loser.id, captured };
+  }
+
+  function doEspionage(state, rng, famId, targetId) {
+    const fam = state.families[famId], target = state.families[targetId]; if (!fam || !target) return { ok: false };
+    const spies = membersWithPerk(state, fam, 'intel');
+    const boss = familyMembers(state, fam).find(c => c.role === 'BOSS');
+    const power = util.clamp(0.35 + spies.length * 0.15 + (boss ? boss.skills.cunning / 300 : 0), 0.1, 0.9);
+    const success = rng.next() < power;
+    let result;
+    if (success) { result = `servet ${totalMoney(target)}₺, ${target.armedMen} silahlı adam`; adjustStanding(state, famId, targetId, -4); state.flags['intel_' + targetId] = 1; }
+    else { result = 'casus yakalandı'; fam.heat = util.clamp(fam.heat + 8, 0, 100); adjustStanding(state, famId, targetId, -10); }
+    if (fam.isPlayer || target.isPlayer) report(state, rng, 'espionage', { family: fam.name, rival: target.name, result });
+    return { ok: true, success, result };
+  }
+
+  function doAssassinate(state, rng, famId, targetId) {
+    const fam = state.families[famId], target = state.families[targetId]; if (!fam || !target) return { ok: false };
+    const hitmen = membersWithPerk(state, fam, 'combat');
+    const victims = familyMembers(state, target).filter(c => c.status === 'active' && c.role !== 'BOSS');
+    const victim = victims.length ? rng.pick(victims) : familyMembers(state, target).find(c => c.status === 'active');
+    if (!victim) return { ok: false, reason: 'no_target' };
+    const power = util.clamp(0.3 + hitmen.length * 0.18 + (schoolMod(fam, 'violenceMult', 1) - 1), 0.1, 0.85);
+    const success = rng.next() < power;
+    if (success) {
+      victim.status = 'dead'; if (victim.id === state.dynasty.bossId) state.flags.successionPending = 1;
+      adjustStanding(state, famId, targetId, -25); target.armedMen = Math.max(0, target.armedMen - 2);
+      if (fam.isPlayer || target.isPlayer) report(state, rng, 'assassination', { family: fam.name, rival: target.name, name: victim.name });
+    } else { fam.heat = util.clamp(fam.heat + 15, 0, 100); adjustStanding(state, famId, targetId, -12); }
+    if (target.aiProfile) target.aiProfile.vengeance = util.clamp(target.aiProfile.vengeance + 0.2, 0, 1);
+    return { ok: true, success };
+  }
+
+  const crewSystem = new CrewSystem();
+  const moleSystem = new MoleSystem();
+  const diplomacySystem = new DiplomacySystem();
+  // Living World tick'ine kaydet (saf fonksiyon imzasıyla)
+  systems.crew = (state, rng) => crewSystem.update(state, rng);
+  systems.mole = (state, rng) => moleSystem.update(state, rng);
+  systems.diplomacy = (state, rng) => diplomacySystem.update(state, rng);
+
+  // Oyuncu komutları (deterministik, rngState'i ilerletir; aktör = oyuncu ailesi)
+  const commands = {
+    hire: (state, opts) => withRng(state, rng => crewSystem.hire(state, rng, playerFamily(state).id, opts)),
+    fire: (state, charId) => withRng(state, rng => crewSystem.fire(state, rng, playerFamily(state).id, charId)),
+    assignJob: (state, charId, jobId) => crewSystem.assignJob(state, charId, jobId),
+    surveil: (state, charId) => withRng(state, rng => moleSystem.surveil(state, rng, charId)),
+    interrogate: (state, charId) => withRng(state, rng => moleSystem.interrogate(state, rng, charId)),
+    loyaltyTest: (state, charId) => withRng(state, rng => moleSystem.loyaltyTest(state, rng, charId)),
+    silence: (state, charId) => withRng(state, rng => moleSystem.silence(state, rng, charId)),
+    declareWar: (state, targetId) => withRng(state, rng => diplomacySystem.declareWar(state, rng, playerFamily(state).id, targetId)),
+    ceasefire: (state, targetId) => withRng(state, rng => diplomacySystem.ceasefire(state, rng, playerFamily(state).id, targetId)),
+    proposeAlliance: (state, targetId) => withRng(state, rng => diplomacySystem.proposeAlliance(state, rng, playerFamily(state).id, targetId)),
+    improveRelations: (state, targetId) => withRng(state, rng => diplomacySystem.improveRelations(state, rng, playerFamily(state).id, targetId)),
+    embargo: (state, targetId) => withRng(state, rng => diplomacySystem.embargo(state, rng, playerFamily(state).id, targetId)),
+    espionage: (state, targetId) => withRng(state, rng => doEspionage(state, rng, playerFamily(state).id, targetId)),
+    assassinate: (state, targetId) => withRng(state, rng => doAssassinate(state, rng, playerFamily(state).id, targetId)),
+    territoryWar: (state, targetId, terrId) => withRng(state, rng => resolveBattle(state, rng, playerFamily(state).id, targetId, terrId)),
+  };
+
+  /* ----------------------------------------------------------------------
    * engine — tick orkestrasyonu (deterministik faz sırası)
    * -------------------------------------------------------------------- */
-  const PHASES = ['economy', 'crime', 'world', 'ai', 'psychology'];   // her tick (=1 ay)
+  const PHASES = ['economy', 'crime', 'world', 'ai', 'psychology', 'crew', 'mole', 'diplomacy'];   // her tick (=1 ay)
   const YEARLY = ['aging', 'rank', 'worldEconomyYear'];               // yılda bir
 
   function tick(state) {
@@ -829,6 +1250,26 @@
         if (!c.attributes) c.attributes = { health: c.health != null ? c.health : 100, happiness: 60, intelligence: 40, looks: 40, reputation: 15 };
         if (!c.vitals) c.vitals = { energy: 100, heat: 0, paranoia: 5 };
         if (!c.psyche) c.psyche = { conscience: 50, trauma: 0, stress: 25, addiction: 0 };
+      });
+      return s;
+    },
+    // v2 → v3: ekip (job/courage/greed), köstebek (isMole/moleRisk/suspicion), diplomasi (armedMen/relations)
+    3: s => {
+      Object.values(s.families || {}).forEach(f => {
+        if (f.armedMen == null) f.armedMen = f.isPlayer ? 3 : 10;
+        if (f.archetype == null) f.archetype = f.aiProfile ? f.aiProfile.archetype : null;
+        if (!f.relations) f.relations = {};
+      });
+      // başlangıç ilişki ağı (yoksa)
+      const fams = Object.values(s.families || {});
+      fams.forEach(a => fams.forEach(b => { if (a.id !== b.id && !a.relations[b.id]) a.relations[b.id] = { standing: 0, treaty: 'peace' }; }));
+      Object.values(s.characters || {}).forEach(c => {
+        if (c.courage == null) c.courage = 50;
+        if (c.greed == null) c.greed = 40;
+        if (c.job == null) c.job = 'none';
+        if (c.isMole == null) c.isMole = false;
+        if (c.moleRisk == null) c.moleRisk = 0;
+        if (c.suspicion == null) c.suspicion = 0;
       });
       return s;
     },
@@ -976,7 +1417,64 @@
     const v1env = JSON.stringify({ version: 1, checksum: '', state: '' });
     const v1state = { meta: { version: 1, seed: 1, createdAt: 0, saveName: 'x', nextId: 5 }, clock: { tick: 3, day: 10, year: 1 }, families: { f1: { id: 'f1', isPlayer: true, cleanMoney: 1, dirtyMoney: 0, reputation: 5, heat: 0, memberIds: ['c1'], territoryIds: [], businessIds: [], relations: {} } }, characters: { c1: { id: 'c1', familyId: 'f1', name: 'X', role: 'BOSS', stats: { combat: 40, cunning: 40, charisma: 40, loyalty: 40, management: 40 }, age: 30, health: 90, status: 'active', relations: {} } }, territories: {}, operations: {}, businesses: {}, market: { goods: {}, trends: {} }, world: { newsFeed: [] }, dynasty: { bossId: 'c1', history: [] }, eventLog: [], flags: {} };
     const migrated = persist.runMigrations(JSON.parse(JSON.stringify(v1state)));
-    check('Migration v1→v2 alanları doldurur', migrated.meta.version === 2 && migrated.clock.month === 1 && !!migrated.characters.c1.vitals && !!migrated.families.f1.school);
+    check('Migration v1→v3 alanları doldurur', migrated.meta.version === 3 && migrated.clock.month === 1 &&
+      !!migrated.characters.c1.vitals && !!migrated.families.f1.school &&
+      migrated.families.f1.armedMen != null && migrated.characters.c1.job === 'none' && !!migrated.families.f1.relations);
+
+    // 15) 6 isimli rakip aile sabit kadro
+    const s15 = createNewGame(1, { now: 1 });
+    const names15 = Object.values(s15.families).map(f => f.name);
+    check('6 isimli rakip aile mevcut', ['Romano Family', 'Volkov Bratva', 'Crimson Triad', 'Los Santos Cartel', 'Black Lotus', 'Iron Syndicate'].every(n => names15.includes(n)));
+
+    // 16) Ekip: işe alım + pozisyon atama
+    const s16 = createNewGame(2, { now: 2 }); applyStartChoice(s16, 'gang');
+    const before16 = playerFamily(s16).memberIds.length;
+    const hireRes = commands.hire(s16, { job: 'lawyer' });
+    check('İşe alım çalışır', hireRes.ok && playerFamily(s16).memberIds.length === before16 + 1);
+    check('Pozisyon atanır', hireRes.ok && s16.characters[hireRes.memberId].job === 'lawyer');
+
+    // 17) Ekip limiti rütbeye göre uygulanır
+    const s17 = createNewGame(3, { now: 3 }); playerFamily(s17).cleanMoney = 10000000;
+    let hitLimit = false;
+    for (let i = 0; i < 40; i++) { const r = commands.hire(s17, {}); if (!r.ok && r.reason === 'limit') { hitLimit = true; break; } }
+    check('Ekip limiti uygulanır', hitLimit);
+
+    // 18) Köstebek: düşük sadakat + açgözlülük → arka planda köstebekleşme
+    const s18 = createNewGame(4, { now: 4 });
+    const m18 = familyMembers(s18, playerFamily(s18)).find(c => c.role !== 'BOSS');
+    m18.skills.loyalty = 3; m18.greed = 95; m18.psyche.stress = 85;
+    const rng18 = util.makeRng(123); let became = false;
+    for (let i = 0; i < 250 && !became; i++) { moleSystem.update(s18, rng18); if (m18.isMole) became = true; }
+    check('Düşük sadakatte köstebek oluşur', became && m18.moleRisk > 0);
+
+    // 19) Sustur (infaz) köstebeği ortadan kaldırır
+    const s19 = createNewGame(5, { now: 5 });
+    const v19 = familyMembers(s19, playerFamily(s19)).find(c => c.role !== 'BOSS'); v19.isMole = true;
+    const sil = commands.silence(s19, v19.id);
+    check('Sustur infaz eder', sil.ok && v19.status === 'dead' && sil.wasMole === true);
+
+    // 20) Diplomasi: savaş ilanı çift yönlü treaty kurar
+    const s20 = createNewGame(6, { now: 6 });
+    const rid20 = Object.keys(s20.families).find(id => !s20.families[id].isPlayer);
+    commands.declareWar(s20, rid20);
+    const pf20 = playerFamily(s20);
+    check('Savaş ilanı iki yönlü treaty', relationOf(pf20, rid20).treaty === 'war' && relationOf(s20.families[rid20], pf20.id).treaty === 'war');
+
+    // 21) Savaş çözümü deterministik
+    const ba = createNewGame(7, { now: 7 }), bb = createNewGame(7, { now: 7 });
+    const ridA = Object.keys(ba.families).find(id => !ba.families[id].isPlayer);
+    commands.territoryWar(ba, ridA); commands.territoryWar(bb, ridA);
+    check('Savaş çözümü deterministik', JSON.stringify(ba) === JSON.stringify(bb));
+
+    // 22) Casusluk sonuç döndürür
+    const s22 = createNewGame(8, { now: 8 });
+    const rid22 = Object.keys(s22.families).find(id => !s22.families[id].isPlayer);
+    const esp = commands.espionage(s22, rid22);
+    check('Casusluk sonuç döner', esp.ok && typeof esp.success === 'boolean');
+
+    // 23) Genişletilmiş tick (8 faz) hâlâ deterministik
+    const fa = run(createNewGame(303, { now: 9 }), 24), fb = run(createNewGame(303, { now: 9 }), 24);
+    check('Genişletilmiş tick determinizmi (8 faz)', JSON.stringify(fa) === JSON.stringify(fb));
 
     const passed = results.filter(r => r.ok).length;
     const total = results.length;
@@ -990,13 +1488,14 @@
    * Public API
    * -------------------------------------------------------------------- */
   root.AHTAPOT = {
-    version: '0.3-phase2',
+    version: '0.4-crew-mole-diplomacy',
     util, rules, data, model,
     state: {
       createNewGame, applyStartChoice, CURRENT_VERSION, playerFamily,
-      helpers: { familyMembers, busyCrew, totalMoney, schoolMod, rankFor, rankName },
+      helpers: { familyMembers, busyCrew, totalMoney, schoolMod, rankFor, rankName, crewAttrs, crewLimit, jobName, familyPower, avgLoyalty, relationOf, alliesOf, isEmbargoed },
     },
-    story, systems, engine, persist, events,
+    story, systems, engine, persist, events, commands,
+    crewSystem, moleSystem, diplomacySystem,
     test: { selfTest },
   };
 })();
@@ -1012,22 +1511,29 @@
   const statusEl = document.getElementById('status');
   const newsEl = document.getElementById('news');
 
-  // Demo oyun başlat (deterministik seed), başlangıç kararını ver, birkaç yıl simüle et
+  // Demo oyun başlat (deterministik seed), başlangıç kararını ver, ekip/diplomasi göster
   const test = A.test.selfTest();
   const g = A.state.createNewGame(Date.now() & 0xffff);
   A.state.applyStartChoice(g, 'rob');         // demo: kanlı başlangıç yolu
+  A.commands.hire(g, { job: 'bodyguard' });   // demo: koruma al
+  A.commands.hire(g, { job: 'spy' });         // demo: casus al
+  const rivalId = Object.keys(g.families).find(id => !g.families[id].isPlayer);
+  A.commands.declareWar(g, rivalId);          // demo: bir rakibe savaş aç
   for (let i = 0; i < 5; i++) A.engine.advanceYear(g);
 
   const fam = A.state.playerFamily(g);
   const boss = g.characters[g.dynasty.bossId];
   const school = A.data.schools.find(s => s.id === fam.school).name;
+  const wars = Object.values(fam.relations).filter(r => r.treaty === 'war').length;
+  const allies = A.state.helpers.alliesOf(g, fam.id).length;
   statusEl.innerHTML =
     'Self-test: <span class="' + (test.ok ? 'ok">' : 'err">') + test.passed + '/' + test.total + '</span> &nbsp;|&nbsp; ' +
     'Çekirdek <code>v' + A.version + '</code> hazır.<br>' +
     boss.name + ' · <code>' + boss.age + '</code> yaş · <code>' + fam.country + '/' + fam.city + '</code> · Ekol: <code>' + school + '</code><br>' +
     'Rütbe: <code>' + A.state.helpers.rankName(fam.rank) + '</code> · Yıl <code>' + g.clock.year + '</code> · Ay <code>' + g.clock.month + '</code><br>' +
     'Temiz <code>' + fam.cleanMoney + '₺</code> · Kirli <code>' + fam.dirtyMoney + '₺</code> · Isı <code>' + fam.heat.toFixed(0) + '</code> · Paranoya <code>' + boss.vitals.paranoia.toFixed(0) + '</code><br>' +
-    'Sağlık <code>' + boss.attributes.health.toFixed(0) + '</code> · Bölge <code>' + fam.territoryIds.length + '</code> · Üye <code>' + fam.memberIds.length + '</code> · Rakip <code>' + (Object.keys(g.families).length - 1) + '</code>';
+    'Sağlık <code>' + boss.attributes.health.toFixed(0) + '</code> · Bölge <code>' + fam.territoryIds.length + '</code> · Üye <code>' + fam.memberIds.filter(id => g.characters[id] && g.characters[id].status === 'active').length + '</code><br>' +
+    'Silahlı adam <code>' + fam.armedMen + '</code> · Güç <code>' + A.state.helpers.familyPower(g, fam) + '</code> · Savaş <code>' + wars + '</code> · İttifak <code>' + allies + '</code> · Rakip <code>' + (Object.keys(g.families).length - 1) + '</code>';
 
   newsEl.innerHTML = g.world.newsFeed.slice(0, 22).map(n => '<div>[Y' + Math.ceil((n.tick + 1) / 12) + '] ' + n.text + '</div>').join('') || '<div>Henüz haber yok…</div>';
 })();
