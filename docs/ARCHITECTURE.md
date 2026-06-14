@@ -1,5 +1,5 @@
 # AHTAPOT — Suç Hanedanlığı & Mafya Yaşam Simülasyonu
-## Game Design + Software Architecture Document (v0.2 — Single-File / Vanilla JS)
+## Game Design + Software Architecture Document (v0.3 — Tam Vizyon / Single-File / Vanilla JS)
 
 > Bu doküman, kod yazımından önceki mimari sözleşmedir. Sonraki geliştirme
 > adımlarında bu dokümandaki modüller, veri modelleri ve sınıf isimleri
@@ -631,6 +631,32 @@ altında hızlandırılmış denge testi koşmayı düşük maliyetle mümkün k
 - `selfTest()` ile hızlandırılmış oto-oyun denge simülasyonları.
 - Opsiyonel: küçük `sw.js` ile garantili offline; bulut kayıt.
 
+### 13.1 Tam Vizyon — 14 Aşamalı Üretim Sırası (v0.3)
+Kullanıcının istediği derinlik (BitLife+CK+FM+Mafia birleşimi) için Faz 1-6
+omurgası korunur, ama içerik aşağıdaki 14 modül halinde üretilir. Her modül
+**çalışır + birbirine bağlı** teslim edilir (placeholder/mock yok):
+
+| # | Modül | Bağımlılık | Durum |
+|---|---|---|---|
+| 1 | Veri Modelleri (tüm entity'ler) | — | Faz 1 ✅ temel; v0.3'te genişler |
+| 2 | Oyun Motoru (tick, faz, RNG, command) | 1 | Faz 1 ✅ temel |
+| 3 | Dünya Simülasyonu (LOD, takvim, tech-era) | 2 | kısmi |
+| 4 | Karakter Sistemi (stat, psikoloji, yaşam) | 1 | yapılacak |
+| 5 | Mafya Sistemi (ekol, rütbe, ekip, köstebek) | 4 | yapılacak |
+| 6 | Ekonomi (nakit/banka, piyasa, aklama, kripto) | 2 | Faz 1 ✅ temel |
+| 7 | Şehir & Bölge (şehir→bölge graf, kontrol) | 6 | Faz 1 ✅ temel |
+| 8 | Diplomasi (AI aile, savaş, casusluk, ittifak) | 5,7 | yapılacak |
+| 9 | Hapishane RPG (çete, dövüş, firar) | 4 | yapılacak |
+| 10 | UI Sistemi (12 menü, üst panel, mobil, PWA) | tümü | Faz 3 |
+| 11 | Save/Load (LocalStorage, autosave, migration) | 1 | Faz 1 ✅ |
+| 12 | Achievement (100+) | tümü | yapılacak |
+| 13 | Legacy (chronicle, dynasty score, varis) | 4 | yapılacak |
+| 14 | Balancing (tuning sabitleri, oto-test) | tümü | sürekli |
+
+Sıralama mantığı: önce veri+motor (1-2), sonra simülasyon+aktörler (3-9),
+sonra arayüz+kalıcılık+meta (10-14). UI (10) en sona kalır çünkü tüm sistemler
+konsoldan/headless doğrulanabilir olmalı (mevcut `selfTest` modeli).
+
 ---
 
 ## Ek: Yerleşik Mimari Kararlar Özeti (ADR-lite)
@@ -648,6 +674,194 @@ altında hızlandırılmış denge testi koşmayı düşük maliyetle mümkün k
 
 ---
 
-*Durum: Mimari v0.2 onaylandı (tek dosya / vanilla JS). Faz 1 çekirdeği
-`index.html` içinde geliştiriliyor (veri modelleri, state, save/load, story engine,
-living world). UI Faz 3'e ertelendi.*
+*Durum: Mimari v0.3 (tam vizyon). Faz 1 çekirdeği `index.html` içinde çalışıyor
+(veri modelleri, state, save/load, story engine, living world; selfTest 8/8).
+Aşağıdaki Ek B, kullanıcının tam spesifikasyonundaki TÜM sistemleri mimariye
+bağlar. UI (12 menü) Faz 3'e ertelendi.*
+
+---
+
+# EK B — Tam Vizyon: Genişletilmiş Sistem Envanteri (v0.3)
+
+> Bu ek, kullanıcının tam spesifikasyonundaki her sistemi somut veri modeli +
+> mekanik + sınıf bağıyla tanımlar. "Teorik anlatım" değil, üretim sözleşmesidir.
+> Hepsi tek `index.html` içinde, `AHTAPOT.*` namespace'i altında, OOP sistem
+> sınıfları olarak gerçeklenecek (anemic veri + System sınıfı; bkz. §2-§3).
+
+## B.0 ÖNEMLİ AÇIK KARAR — Service Worker ↔ Tek Dosya Çelişkisi
+Tam spesifikasyon hem **"EN KRİTİK KURAL: tek HTML dosyası"** hem de **"Service
+Worker ekle / offline çalışsın"** diyor. Bu ikisi teknik olarak çelişir: tarayıcı
+service worker'ı **ayrı bir `.js` dosyası** olarak ister (inline SW kaydedilemez).
+İki çözüm var; karar kullanıcıya aittir (bkz. yanıttaki soru):
+1. **Katı tek dosya (varsayılan):** SW yok; PWA, data-URI manifest + iOS/Android
+   meta + "ana ekrana ekle" ile. Offline, tek dosya tarayıcı önbelleğiyle gelir.
+2. **Tam offline PWA:** Yanına ~15 satırlık `sw.js` + ayrı `manifest.json`.
+   "Tek dosya" kuralı bilinçli gevşetilir; garantili kurulu-offline kazanılır.
+
+## B.1 Karakter & Üst Panel Modeli (genişletilmiş)
+```ts
+interface Character {
+  id, name, country, city, age, school /* SuçEkolü */, rank,
+  attributes: { health, happiness, intelligence, looks, reputation },
+  vitals:     { energy, heat /*aranma*/, paranoia },
+  psyche:     { conscience, trauma, stress, addiction },   // B.7
+  money:      { dirtyCash, cleanBank },
+  skills:     { combat, cunning, charisma, loyalty, management, hacking },
+  status, traits[], relations{}, isHeir, ...
+}
+```
+Üst panel 15 alan: Yaş, İsim, Ülke, Suç Ekolü, Sağlık, Mutluluk, Zeka, Görünüş,
+Saygınlık, Heat, Paranoya, Enerji, Kirli Nakit, Temiz Banka, Rütbe → hepsi
+`Character` + `Family`'den türetilir, her tick güncellenir.
+
+## B.2 Suç Ekolleri (CrimeSchool — data-driven modifier'lar)
+`AHTAPOT.data.schools`: İtalyan Mafyası (siyasi nüfuz +20%, aklama maliyeti -5%),
+Yakuza (sadakat +25%, yakalanma -10%), Kolombiya Karteli (kirli gelir +30%,
+silahlı güç +10%), Rus Bratva (şiddet +20%, bölge ele geçirme +15%), Triad
+(ticaret kârı +20%, kaçakçılık +25%). Her ekol bir `modifiers{}` haritasıdır;
+sistemler hesaplamada bu çarpanları okur (tek noktadan denge).
+
+## B.3 Rütbe Hiyerarşisi (8 kademe)
+Serseri → Çete Üyesi → Tetikçi → Kaptan → Sağ Kol → Don → Godfather →
+Shadow Emperor. `RankSystem`: her rütbe yeni suçlar/gelirler/bölgeler/riskler
+açar (`unlocks{ crimes[], territories[], businesses[] }`). Terfi koşulu:
+reputation + servet + tamamlanan kilometre taşları.
+
+## B.4 Karakter & Psikoloji Sistemi (`PsychologySystem`)
+Paranoya, vicdan, travma, stres, bağımlılık her tick evrilir (suç → travma↑,
+ihanet → paranoya↑, dinlenme → stres↓). Yüksek paranoya **algı bozulması**
+üretir: StoryEngine'e *yanlış* ihanet/halüsinasyon olayları enjekte eder (gerçek
+olmayan ama oyuncuya gerçek görünen olaylar → yanlış karar riski). Bağımlılık
+enerji/sağlık tavanını düşürür.
+
+## B.5 Ekip & Köstebek Sistemi (`CrewSystem`, `MoleSystem`)
+Pozisyonlar: Muhasebeci, Tetikçi, Koruma, Avukat, Casus, Operasyon Şefi. Üye:
+`{ loyalty, courage, greed, intelligence }`. Düşük sadakat → `MoleSystem` gizli
+"betrayalRisk" üretir (ihbar/hırsızlık/ihanet/suikast). Oyuncu kararları:
+takip ettir, sorgula, sadakat testi, sustur. Köstebek kimliği oyuncudan
+**gizli durumdur** (intelligence ile kısmen açığa çıkar) → §B.11 ile bağlı.
+
+## B.6 Şehir & Bölge Sistemi (`TerritorySystem`, genişletilmiş)
+`City → District[]`. Her bölge: polis yoğunluğu, nüfus, gelir seviyesi, rakip
+çete sayısı, sadakat, koruma geliri, insan kaynağı, kaçakçılık puanı, defense,
+adjacency. Eylemler: satın al, savaş aç, baskın yap, koruma parası topla,
+upgrade. Şehirler birden çok (İstanbul/Kadıköy,Beşiktaş,Taksim… vb.) — çok
+şehirli graf, LOD ile ölçeklenir.
+
+## B.7 Rakip Aileler & Çete Savaşları (`AISystem`, `DiplomacySystem`)
+Aileler: Romano Family, Volkov Bratva, Crimson Triad, Los Santos Cartel,
+Black Lotus, Iron Syndicate (+ proseduralanlar). Her biri: güç, servet, sadakat,
+topraklar, silahlı adam sayısı, `AIProfile`(archetype+grudge). Diplomasi
+eylemleri: diplomasi, ateşkes, ittifak, casusluk, suikast, toprak savaşı,
+ambargo. AI behavior: hedef seç → risk değerlendir → hamle (LOD'lu).
+
+## B.8 Yaşayan Dünya + Dinamik Ekonomi (`WorldSystem`, `EconomySystem`)
+Oyuncu pasifken de: aileler güçlenir/çöker/birleşir/savaşır; şirketler açılır/
+iflas eder; politikacılar seçilir/gider; polis operasyon yapar. Yıllık dünya
+olayları: enflasyon, resesyon, kriz, petrol fiyatı, teknoloji patlaması, kripto
+piyasası, polis reformu, seçim → hepsi `market` çarpanlarını ve risk/gelir
+sabitlerini etkiler (global ekonomik durum nesnesi).
+
+## B.9 Kaçak Ticaret & Kara Para Aklama (`TradeSystem`, `LaunderingSystem`)
+Ürünler: Silah, Lüks Saat, Kaçak Çip, Kripto Kaset, Nadir Sanat, Teknoloji
+Prototipi → fiyat = arz/talep/dünya-olayı (mean-reverting + şok). İşletmeler:
+Oto Yıkama, Gece Kulübü, Kumarhane, Sanat Galerisi, Lüks Restoran, Teknoloji
+Şirketi → her biri `{ staff, taxRisk, income, launderEfficiency }`. Vergi riski
+denetim olayı tetikleyebilir.
+
+## B.10 Siyasi Yozlaşma (`PoliticsSystem`)
+Satın alınabilir: Belediye Başkanı, Savcı, Hakim, Emniyet Müdürü, Bakan. Yüksek
+seviye: kukla siyasetçi, seçim manipülasyonu, hükümet kontrolü → heat azaltma,
+mahkeme sonuçlarını eğme, ihale/koruma. `influence` haritası fraksiyonlara bağlı.
+
+## B.11 İstihbarat (`IntelligenceSystem`) & Kurumlar (`AgencySystem`)
+Oyuncu: casus gönder, telefon dinlet, muhbir satın al, rakibe ajan yerleştir →
+**istihbarat raporları** (StoryEngine üretir). Kurumlar: FBI, CIA, Interpol, MİT,
+Europol → oyuncuyu dinler/takip eder/ajan gönderir (heat & paranoya ile bağlı).
+
+## B.12 Uluslararası Kaçış (`EscapeSystem`)
+Ülkeler: Dubai, Karadağ, Rusya, Kolombiya, Tayland, Singapur — bazılarında iade
+anlaşması yok (`extradition: false`). Kaçış heat'i sıfırlamaz ama kurum erişimini
+kısar; sürgün gelir/operasyon menzilini daraltır (denge bedeli).
+
+## B.13 Silah/Ekipman & Varlıklar (`InventorySystem`, `AssetSystem`)
+Silah/ekipman: Tabanca, Susturucu, Keskin Nişancı, Çelik Yelek, Zırhlı Araç,
+Şifreli Telefon × kalite (Sıradan/Profesyonel/Askeri/Efsanevi) → savaş/operasyon
+çarpanı. Varlıklar: Malikâne, Yat, Özel Jet, Ada, Sığınak + yükseltmeler
+(Güvenlik, Kaçış Tüneli, Gizli Kasa) → savunma/heat/aklama bonusu.
+
+## B.14 Romantizm, Aile & Varis Genetiği (`RelationshipSystem`, `GeneticsSystem`)
+Flört/evlilik/boşanma/sadakatsizlik. Eş bazen ajan/rakip aile üyesi (gizli flag).
+Çocuklar özelliklerle doğar: Korkak/Dahi/Psikopat/Sadık/Açgözlü (ebeveyn stat +
+RNG genetik karışım). Oyuncu: eğitim/kariyer/varis seçer → §B.16 ile bağlı.
+
+## B.15 Aile Ağacı (`DynastySystem` görünümü)
+Çok nesilli soy ağacı: Dede→Baba→Oyuncu→Çocuklar→Torunlar. Veri: `lineage[]`
+düğümleri (parentIds, generation). UI'da görsel ağaç (Faz 5).
+
+## B.16 Hapishane RPG (`PrisonSystem`)
+Hapishane çeteleri, ring dövüşleri, gardiyan satın alma, isyan, firar planı,
+tünel kazma. Hapisteyken ayrı alt-döngü (kendi tick fazı); dışarıdaki imparatorluk
+ekip tarafından LOD'lu yönetilir → çıkışta devir teslim.
+
+## B.17 Siber Suç (`CyberSystem`) & Teknoloji Çağları (`EraSystem`)
+Dark Web, kripto dolandırıcılığı, veri hırsızlığı, fidye yazılımı, dijital kimlik
+sahteciliği (skill: hacking). `EraSystem`: 1950→2100; her dönem yeni suç/teknoloji/
+risk açar/kapatır (içerik era-gated; örn. siber suç ancak ileri dönemde).
+
+## B.18 Medya & Kamuoyu (`MediaSystem`)
+Gazeteler oyuncu hakkında haber yapar / operasyonları duyurur (heat & reputation
+etkiler). Oyuncu: medya satın al, itibar kampanyası → haberleri bastır/yönlendir.
+
+## B.19 Başarımlar (`AchievementSystem`, 100+)
+Veri-tablo: `{ id, name, desc, condition(state), hidden }`. Kategoriler: kan/şiddet,
+servet, bölge, rütbe, hanedan, kurum. Her tick koşullar kontrol edilir (ucuz
+predicate'ler). Örn: İlk Kan, Sokak Kralı, Don Corleone, İmparator, Son Baba,
+Interpol Kabusu.
+
+## B.20 Legacy Chronicle, Dynasty Score & Endgame
+Her ölümde otomatik kayıt: ad, yaşam yılları, cinayet sayısı, servet, hapis
+geçmişi, çocuklar, kontrol edilen bölgeler → `dynasty.history[]` (tüm nesiller
+okunabilir). **DynastyScore** = f(servet, bölge sayısı, politik güç, sadakat,
+nesil sayısı). **Endgame** hedefleri: 1 Milyar temiz para, 50 şehir, dünya çapı
+ağ, politik kontrol, 5 nesil hanedanlık.
+
+## B.21 Procedural Story Engine — Ölçek Stratejisi (5000+ olay)
+5000+ olay **elle yazılmaz**; kombinatoryal **gramer** ile üretilir:
+```
+olay = şablon(tip) × aktör(aile/karakter) × yer(bölge/şehir) × sonuç(rng) × bağlam(era/ekonomi)
+```
+- ~150 parametreli şablon × değişken ikamesi × durum koşulu → milyonlarca varyant.
+- Kategoriler: 5000+ olay, 1000+ senaryo, 500+ haber, 200+ ihanet, 100+ mahkeme,
+  100+ hapishane → her biri kendi şablon-grameri + ağırlıklı seçim (weighted RNG).
+- Determinizm korunur (seeded RNG) → "hiçbir oyun aynı değil" + tekrar-üretilebilir.
+
+## B.22 UI Mimarisi — Mobil Öncelikli (Faz 3, 12 menü)
+- **Üst panel:** 15 stat (B.1), sticky, kompakt rozet ızgarası.
+- **Alt navigasyon (sabit, mobil-app tarzı):** 12 menü → Profil & Hayatım, Suç
+  Dünyası, Ticaret, Bölgeler, İmparatorluk, Siyaset, Ekip, Aile, Hapishane,
+  Başarımlar, Legacy Chronicle, Yaş Al (+1 Yıl).
+- **Mobile-first:** 360/390/414/430px optimize, min 48px dokunmatik hedef, tek
+  elle kullanım, responsive font (clamp), portrait+landscape, popup'lar ekran
+  taşmaz (`max-height:90dvh; overflow:auto`), tablolar → kart, `alert()` YOK
+  (özel modal). Tema: Mafia Noir / Cyber Crimson (#0a0a0a/#121212/#ff3333/
+  #f5c542/#8b5cf6/#ffffff), glow/blur/transition efektleri.
+- **Splash/uygulama-açılış ekranı**, autosave (her yıl sonu + her N tick).
+- **Render:** dirty-section seçici DOM güncelleme; düşük RAM dostu.
+
+## B.23 OOP & State Yönetimi (sınıf-başına-sistem)
+Kullanıcı talebi gereği her sistem ayrı **sınıf**: `class EconomySystem { update(state) }`,
+`class CombatSystem`, `class PsychologySystem`… Hepsi `SimulationEngine` tarafından
+sıralı çağrılır. `GameState` tek kaynak (anemic veri); `StateManager` mutasyon +
+`EventBus` yayını + autosave kancası. Komutlar `CommandBus` üzerinden (UI→core).
+
+---
+
+## Başlangıç Senaryosu (referans akış)
+Oyuncu **14 yaşında** başlar; isim/ülke/şehir/aile rastgele (seeded). İlk olay:
+"Babanın tefecilere kumar borcu var." → A) Tefeciyi soy, B) Polise git, C) Çeteden
+yardım iste. Her seçim **farklı başlangıç yolu** açar (farklı stat/ilişki/heat/ekol
+eğilimi) → `StoryEngine` dallanması + `flags` ile kalıcı sonuç.
+
+*Sonraki adım: B.0'daki Service Worker kararını netleştir; ardından 14 modülü
+sırayla (mevcut çekirdeğin üstüne) üretmeye geçiyoruz. Hiçbir sistem mock değil.*
