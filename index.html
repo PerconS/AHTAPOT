@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <!-- Mobile-first + PWA: viewport, tema, iOS/Android tam ekran "ana ekrana ekle" -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0b0b0d" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="AHTAPOT" />
+  <meta name="description" content="Suç Hanedanlığı ve Mafya Yaşam Simülasyonu" />
+  <!-- Inline (data-URI) manifest: katı tek-dosya kuralını korur, ayrı dosya yok -->
+  <link rel="manifest" href='data:application/manifest+json,{"name":"AHTAPOT - Su%C3%A7 Hanedanl%C4%B1%C4%9F%C4%B1","short_name":"AHTAPOT","start_url":".","display":"standalone","orientation":"portrait","background_color":"%230b0b0d","theme_color":"%230b0b0d"}' />
+  <title>AHTAPOT — Suç Hanedanlığı Simülasyonu</title>
+  <style>
+    /* Faz 1: gerçek UI yok. Sadece mobile-first iskelet + çekirdek durum bilgisi. */
+    :root { --bg:#0b0b0d; --fg:#e7e3da; --muted:#8a8478; --accent:#b8893a; --line:#1d1d22; }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin:0; padding:0; background:var(--bg); color:var(--fg);
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+    body { min-height:100dvh; padding: max(16px, env(safe-area-inset-top)) 16px 16px;
+      max-width: 720px; margin: 0 auto; }
+    h1 { font-size: 18px; letter-spacing: 2px; color: var(--accent); margin: 0 0 4px; }
+    .sub { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
+    .card { border:1px solid var(--line); border-radius:10px; padding:12px; margin-bottom:12px; }
+    .card h2 { font-size: 12px; color: var(--muted); text-transform: uppercase;
+      letter-spacing:1px; margin:0 0 8px; }
+    code { color: var(--accent); }
+    #status { font-size: 12px; line-height: 1.7; }
+    #news { font-size: 12px; line-height: 1.6; color: var(--fg); max-height: 40dvh; overflow:auto; }
+    #news div { padding: 4px 0; border-bottom: 1px dashed var(--line); }
+    .ok { color:#6fbf73; } .err { color:#d9534f; }
+  </style>
+</head>
+<body>
+  <h1>AHTAPOT</h1>
+  <div class="sub">Suç Hanedanlığı & Mafya Yaşam Simülasyonu — <b>Faz 1: Çekirdek (UI yok)</b></div>
+
+  <div class="card">
+    <h2>Durum</h2>
+    <div id="status">Çekirdek yükleniyor…</div>
+  </div>
+
+  <div class="card">
+    <h2>Yaşayan Dünya — Haber Akışı</h2>
+    <div id="news"></div>
+  </div>
+
+  <div class="card">
+    <h2>Konsol API'si</h2>
+    <div class="sub" style="margin:0">
+      Bu faz UI içermez. Tarayıcı konsolundan dene:<br />
+      <code>AHTAPOT.test.selfTest()</code> — doğrulama testleri<br />
+      <code>const g = AHTAPOT.state.createNewGame(123)</code> — yeni oyun<br />
+      <code>AHTAPOT.engine.run(g, 30)</code> — 30 gün simüle et<br />
+      <code>AHTAPOT.persist.save('slot1', g)</code> / <code>AHTAPOT.persist.load('slot1')</code>
+    </div>
+  </div>
+
+<script id="ahtapot-core">
+/* =========================================================================
+ * AHTAPOT — Çekirdek Simülasyon (Faz 1)
+ * Tek dosya, vanilla ES6+, sıfır bağımlılık. DOM'a dokunmaz (UI ayrı, faz 3).
+ * Node altında da çalışır (self-test / headless denge analizi).
+ * ========================================================================= */
+(function () {
+  'use strict';
+  const root = (typeof globalThis !== 'undefined') ? globalThis : this;
+
+  /* ----------------------------------------------------------------------
+   * util — RNG (deterministik), id üretimi, matematik, checksum
+   * -------------------------------------------------------------------- */
+  const util = (() => {
+    function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+    // mulberry32: 32-bit state, tek tam sayıyla serileştirilebilir → save dostu
+    function makeRng(seed) {
+      let s = seed >>> 0;
+      return {
+        get state() { return s; },
+        set state(v) { s = v >>> 0; },
+        next() {
+          s = (s + 0x6d2b79f5) | 0;
+          let t = Math.imul(s ^ (s >>> 15), 1 | s);
+          t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+          return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        },
+        int(min, max) { return min + Math.floor(this.next() * (max - min + 1)); },
+        chance(p) { return this.next() < p; },
+        pick(arr) { return arr[Math.floor(this.next() * arr.length)]; },
+        pickN(arr, n) {
+          const copy = arr.slice(); const out = [];
+          while (out.length < n && copy.length) out.push(copy.splice(Math.floor(this.next() * copy.length), 1)[0]);
+          return out;
+        },
+      };
+    }
+
+    // FNV-1a 32-bit: save bütünlüğü için hafif checksum
+    function fnv1a(str) {
+      let h = 0x811c9dc5;
+      for (let i = 0; i < str.length; i++) {
+        h ^= str.charCodeAt(i);
+        h = Math.imul(h, 0x01000193);
+      }
+      return (h >>> 0).toString(16);
+    }
+
+    function avg(nums) { return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0; }
+
+    return { clamp, makeRng, fnv1a, avg };
+  })();
+
+  /* ----------------------------------------------------------------------
+   * rules — denge sabitleri (data-driven; kod değişmeden tuning)
+   * -------------------------------------------------------------------- */
+  const rules = {
+    version: 1,
+    start: { clean: 5000, dirty: 0 },
+    salary: { BOSS: 0, UNDERBOSS: 500, CAPO: 300, SOLDIER: 150, ASSOCIATE: 80 },
+    launderCut: 0.15,
+    heatDecayPerTick: 0.4,
+    raidHeatThreshold: 65,
+    raidChancePerTick: 0.12,
+    eventLogMax: 250,
+    newsFeedMax: 40,
+    aiFamilyCount: 4,
+    territoryCount: 12,
+    daysPerYear: 360,
+    aiOpBaseChance: 0.06,
+  };
+
+  /* ----------------------------------------------------------------------
+   * data — katalog + isim havuzları + anlatı şablonları
+   * -------------------------------------------------------------------- */
+  const data = {
+    crimeTypes: [
+      { id: 'extortion', name: 'Haraç', baseRisk: 0.15, rewardMin: 300, rewardMax: 900, heat: 4, skills: ['charisma', 'combat'], duration: 3 },
+      { id: 'loan', name: 'Tefecilik', baseRisk: 0.12, rewardMin: 200, rewardMax: 600, heat: 2, skills: ['charisma'], duration: 4 },
+      { id: 'smuggling', name: 'Kaçakçılık', baseRisk: 0.35, rewardMin: 1200, rewardMax: 4000, heat: 9, skills: ['cunning', 'management'], duration: 6 },
+      { id: 'heist', name: 'Soygun', baseRisk: 0.55, rewardMin: 4000, rewardMax: 12000, heat: 18, skills: ['cunning', 'combat'], duration: 8 },
+      { id: 'hit', name: 'Suikast', baseRisk: 0.6, rewardMin: 0, rewardMax: 0, heat: 22, skills: ['combat', 'cunning'], duration: 5 },
+    ],
+    businessTypes: [
+      { id: 'restaurant', name: 'Restoran', income: 400, launder: 800, cover: 0.4 },
+      { id: 'casino', name: 'Kumarhane', income: 1500, launder: 3000, cover: 0.6 },
+      { id: 'laundromat', name: 'Çamaşırhane', income: 150, launder: 1200, cover: 0.5 },
+      { id: 'club', name: 'Gece Kulübü', income: 900, launder: 2000, cover: 0.55 },
+    ],
+    archetypes: ['aggressor', 'merchant', 'schemer', 'turtle', 'opportunist'],
+    firstNames: ['Cesare', 'Vito', 'Salvatore', 'Enzo', 'Marco', 'Rocco', 'Dario', 'Bruno', 'Nico', 'Lorenzo', 'Kemal', 'Reis', 'Sabri', 'Cihangir', 'Davut'],
+    lastNames: ['Corvino', 'Falcone', 'Moretti', 'Rizzo', 'Bellandi', 'Galante', 'Serrano', 'Drakos', 'Karadağ', 'Demirhan', 'Aslanoğlu'],
+    familyNames: ['Corvino', 'Falcone', 'Moretti', 'Serrano', 'Drakos', 'Karadağ', 'Aslan', 'Bellandi'],
+    districts: ['Liman', 'Eski Çarşı', 'Tepebaşı', 'Sanayi', 'Sahil', 'Kuzey Mahalle', 'Garaj', 'Çukur', 'Hipodrom', 'Köprüaltı', 'Gümrük', 'Fener'],
+    story: {
+      'op.start': [
+        '{family}, {district} bölgesinde bir {crime} işine girişti.',
+        '{family} ekibi {district} üzerinde {crime} planını harekete geçirdi.',
+      ],
+      'op.success': [
+        '{family}, {district} bölgesinde {crime} işini temiz bitirdi. Kasaya {amount}₺ aktı.',
+        '{crime} tıkır tıkır işledi: {family} {district}\'ten {amount}₺ ile döndü.',
+      ],
+      'op.failure': [
+        '{family} {district}\'teki {crime} işinde eli boş döndü. İz bırakmadılar ama kâr yok.',
+        '{crime} ters gitti; {family} {district}\'ten elini sallayarak çıktı.',
+      ],
+      'op.busted': [
+        'Baskın! {family}\'nin {district}\'teki {crime} işi suçüstü basıldı, {name} içeri düştü.',
+        'Polis {district}\'te kıstırdı; {family}\'nin {crime} işi battı, {name} tutuklandı.',
+      ],
+      'raid': [
+        'Şafak operasyonu: polis {family} üzerine yüklendi, {amount}₺ haraca el konuldu.',
+        '{family} üzerindeki baskı patladı; baskında {amount}₺ kayıp.',
+      ],
+      'income': [
+        '{family} bölgelerden {amount}₺ haraç topladı.',
+      ],
+      'hit': [
+        '{family} bir suikast düzenledi; sokakta dengeler sarsıldı.',
+      ],
+    },
+  };
+
+  /* ----------------------------------------------------------------------
+   * model — entity factory'leri (saf veri, davranış yok)
+   * -------------------------------------------------------------------- */
+  function nextId(state, prefix) { return prefix + (state.meta.nextId++); }
+
+  const model = {
+    createCharacter(state, rng, familyId, role) {
+      const base = role === 'BOSS' ? 55 : role === 'UNDERBOSS' ? 45 : 35;
+      const stat = () => util.clamp(base + rng.int(-10, 25), 1, 100);
+      return {
+        id: nextId(state, 'c'),
+        familyId,
+        name: rng.pick(data.firstNames) + ' ' + rng.pick(data.lastNames),
+        role,
+        stats: { combat: stat(), cunning: stat(), charisma: stat(), loyalty: stat(), management: stat() },
+        traits: [],
+        age: rng.int(role === 'BOSS' ? 40 : 22, role === 'BOSS' ? 62 : 45),
+        health: 100,
+        status: 'active',
+        isHeir: false,
+        relations: {},
+      };
+    },
+    createTerritory(state, rng, name) {
+      return {
+        id: nextId(state, 't'),
+        name,
+        ownerId: null,
+        baseIncome: rng.int(200, 900),
+        heat: 0,
+        defense: rng.int(5, 25),
+        adjacency: [],
+        upgrades: [],
+        contested: false,
+      };
+    },
+    createBusiness(state, ownerId, type) {
+      return {
+        id: nextId(state, 'b'),
+        ownerId,
+        type: type.id,
+        income: type.income,
+        launderCapacity: type.launder,
+        coverStrength: type.cover,
+        heat: 0,
+      };
+    },
+    createFamily(state, rng, name, isPlayer) {
+      return {
+        id: nextId(state, 'f'),
+        name: name + ' Ailesi',
+        isPlayer,
+        cleanMoney: isPlayer ? rules.start.clean : rng.int(2000, 8000),
+        dirtyMoney: isPlayer ? rules.start.dirty : rng.int(0, 3000),
+        reputation: rng.int(10, 40),
+        heat: 0,
+        memberIds: [],
+        territoryIds: [],
+        businessIds: [],
+        relations: {},
+        aiProfile: isPlayer ? null : {
+          archetype: rng.pick(data.archetypes),
+          aggression: rng.next(), greed: rng.next(), caution: rng.next(), vengeance: rng.next(),
+          goals: [], grudges: {},
+        },
+      };
+    },
+    createOperation(state, rng, familyId, crime, crewIds, targetId) {
+      return {
+        id: nextId(state, 'o'),
+        familyId,
+        type: crime.id,
+        crewIds: crewIds.slice(),
+        targetId: targetId || null,
+        baseRisk: crime.baseRisk,
+        risk: crime.baseRisk,
+        progress: 0,
+        durationTicks: crime.duration,
+        status: 'active',
+        startedTick: state.clock.tick,
+        expectedReward: crime.rewardMax ? rng.int(crime.rewardMin, crime.rewardMax) : 0,
+        heat: crime.heat,
+      };
+    },
+  };
+
+  /* ----------------------------------------------------------------------
+   * state — yeni oyun kurulumu (deterministik, seed'e bağlı)
+   * -------------------------------------------------------------------- */
+  const CURRENT_VERSION = 1;
+
+  function createNewGame(seed, opts) {
+    opts = opts || {};
+    const rng = util.makeRng(seed >>> 0 || 1);
+    const state = {
+      meta: { version: CURRENT_VERSION, seed: seed >>> 0, createdAt: opts.now != null ? opts.now : Date.now(), saveName: opts.saveName || 'Yeni Hanedan', nextId: 1 },
+      clock: { tick: 0, speed: 1, paused: false, year: 1, day: 1 },
+      rngState: 0,
+      families: {},
+      characters: {},
+      territories: {},
+      operations: {},
+      businesses: {},
+      market: { goods: {}, trends: { policePressure: 0.2, economy: 0.5 } },
+      world: { policeHeatGlobal: 10, newsFeed: [], factions: { police: { influence: 0.5 }, politics: { influence: 0.4 } } },
+      dynasty: { bossId: null, heirs: [], generation: 1, legacyPoints: 0, perks: [], history: [] },
+      eventLog: [],
+      flags: {},
+    };
+
+    // --- Bölgeler: bağlı bir graf (zincir + deterministik çapraz bağlar) ---
+    const terrs = data.districts.slice(0, rules.territoryCount).map(n => model.createTerritory(state, rng, n));
+    terrs.forEach(t => { state.territories[t.id] = t; });
+    for (let i = 0; i < terrs.length; i++) {
+      if (i > 0) link(terrs[i], terrs[i - 1]);                 // zincir → bağlılık garantisi
+      if (rng.chance(0.5) && i >= 2) link(terrs[i], terrs[rng.int(0, i - 1)]); // çapraz bağ
+    }
+    function link(a, b) {
+      if (!a.adjacency.includes(b.id)) a.adjacency.push(b.id);
+      if (!b.adjacency.includes(a.id)) b.adjacency.push(a.id);
+    }
+
+    // --- Oyuncu ailesi + patron + ekip ---
+    const player = model.createFamily(state, rng, rng.pick(data.familyNames), true);
+    state.families[player.id] = player;
+    const boss = model.createCharacter(state, rng, player.id, 'BOSS');
+    boss.isHeir = false;
+    state.characters[boss.id] = boss;
+    player.memberIds.push(boss.id);
+    state.dynasty.bossId = boss.id;
+    for (let i = 0; i < 4; i++) {
+      const role = i === 0 ? 'UNDERBOSS' : i === 1 ? 'CAPO' : 'SOLDIER';
+      const c = model.createCharacter(state, rng, player.id, role);
+      state.characters[c.id] = c;
+      player.memberIds.push(c.id);
+    }
+
+    // --- AI rakip aileler ---
+    const aiNames = data.familyNames.filter(n => n + ' Ailesi' !== player.name);
+    for (let i = 0; i < rules.aiFamilyCount; i++) {
+      const fam = model.createFamily(state, rng, rng.pick(aiNames), false);
+      state.families[fam.id] = fam;
+      const bossA = model.createCharacter(state, rng, fam.id, 'BOSS');
+      state.characters[bossA.id] = bossA;
+      fam.memberIds.push(bossA.id);
+      const crewN = rng.int(2, 4);
+      for (let j = 0; j < crewN; j++) {
+        const c = model.createCharacter(state, rng, fam.id, rng.pick(['CAPO', 'SOLDIER', 'SOLDIER']));
+        state.characters[c.id] = c;
+        fam.memberIds.push(c.id);
+      }
+    }
+
+    // --- Bölge sahipliği dağıt: oyuncu + AI + bir kısmı tarafsız ---
+    const fams = Object.values(state.families);
+    const shuffled = rng.pickN(terrs, terrs.length);
+    let ti = 0;
+    fams.forEach(f => {
+      const owned = f.isPlayer ? 2 : rng.int(1, 2);
+      for (let k = 0; k < owned && ti < shuffled.length; k++, ti++) {
+        const t = shuffled[ti];
+        t.ownerId = f.id;
+        f.territoryIds.push(t.id);
+      }
+    });
+    // kalan bölgeler tarafsız kalır (genişleme için av sahası)
+
+    // --- Oyuncuya başlangıç işletmeleri (aklama kapasitesi) ---
+    [data.businessTypes[0], data.businessTypes[2]].forEach(bt => {
+      const b = model.createBusiness(state, player.id, bt);
+      state.businesses[b.id] = b;
+      player.businessIds.push(b.id);
+    });
+
+    // --- Dynasty ilk bölümü ---
+    state.dynasty.history.push({ generation: 1, bossName: boss.name, startedYear: 1, peakWealth: player.cleanMoney, note: 'Hanedanın kuruluşu.' });
+
+    state.rngState = rng.state;
+    report(state, util.makeRng(state.rngState), 'world.start', { text: `${player.name} sahnede. ${Object.keys(state.families).length - 1} rakip aile ve ${terrs.length} bölge ile oyun başladı.` });
+    return state;
+  }
+
+  /* ----------------------------------------------------------------------
+   * helpers — türetilmiş erişimciler (persist edilmez)
+   * -------------------------------------------------------------------- */
+  function playerFamily(state) { return Object.values(state.families).find(f => f.isPlayer); }
+  function familyMembers(state, fam) { return fam.memberIds.map(id => state.characters[id]).filter(Boolean); }
+  function busyCrew(state, familyId) {
+    const set = new Set();
+    Object.values(state.operations).forEach(o => { if (o.familyId === familyId && o.status === 'active') o.crewIds.forEach(c => set.add(c)); });
+    return set;
+  }
+  function totalMoney(fam) { return fam.cleanMoney + fam.dirtyMoney; }
+
+  /* ----------------------------------------------------------------------
+   * story — procedural anlatı motoru (şablon + ikame)
+   * -------------------------------------------------------------------- */
+  const story = {
+    narrate(type, ctx, rng) {
+      const templates = data.story[type];
+      if (!templates) return ctx.text || '';
+      let line = rng ? rng.pick(templates) : templates[0];
+      return line.replace(/\{(\w+)\}/g, (_, k) => (ctx[k] != null ? ctx[k] : '?'));
+    },
+  };
+
+  // report: yapısal olayı anlatıya çevirip eventLog + newsFeed'e (dairesel) yazar
+  function report(state, rng, type, ctx) {
+    const text = (ctx && ctx.text) ? ctx.text : story.narrate(type, ctx || {}, rng);
+    const entry = { tick: state.clock.tick, type, text };
+    state.eventLog.push(entry);
+    if (state.eventLog.length > rules.eventLogMax) state.eventLog.shift();
+    if (text) {
+      state.world.newsFeed.unshift(entry);
+      if (state.world.newsFeed.length > rules.newsFeedMax) state.world.newsFeed.pop();
+    }
+    return entry;
+  }
+
+  /* ----------------------------------------------------------------------
+   * systems — her biri (state, rng) alır, mutasyon yapar, olay raporlar
+   * -------------------------------------------------------------------- */
+  const systems = {
+    economy(state, rng) {
+      Object.values(state.families).forEach(fam => {
+        // Bölge haraçları → kirli para (ısıyla hafif düşer)
+        let haraç = 0;
+        fam.territoryIds.forEach(tid => {
+          const t = state.territories[tid];
+          if (!t) return;
+          haraç += Math.round(t.baseIncome * util.clamp(1 - t.heat / 200, 0.4, 1));
+        });
+        fam.dirtyMoney += haraç;
+
+        // İşletme geliri → temiz para
+        let clean = 0, launderCap = 0;
+        fam.businessIds.forEach(bid => {
+          const b = state.businesses[bid];
+          if (!b) return; clean += b.income; launderCap += b.launderCapacity;
+        });
+        fam.cleanMoney += clean;
+
+        // Kara para aklama (kapasite kadar, kesintiyle)
+        const launder = Math.min(fam.dirtyMoney, launderCap);
+        if (launder > 0) {
+          fam.dirtyMoney -= launder;
+          fam.cleanMoney += Math.round(launder * (1 - rules.launderCut));
+        }
+
+        // Personel maaşı (önce temiz, sonra kirli)
+        let upkeep = 0;
+        familyMembers(state, fam).forEach(c => { if (c.status === 'active') upkeep += (rules.salary[c.role] || 0); });
+        payFrom(fam, upkeep);
+
+        // Aile ısısı zamanla soğur
+        fam.heat = util.clamp(fam.heat - rules.heatDecayPerTick, 0, 100);
+
+        if (fam.isPlayer && haraç > 0 && state.clock.tick % 5 === 0) {
+          report(state, rng, 'income', { family: fam.name, amount: haraç });
+        }
+      });
+    },
+
+    crime(state, rng) {
+      Object.values(state.operations).forEach(op => {
+        if (op.status !== 'active') return;
+        op.progress += 1 / op.durationTicks;
+        const fam = state.families[op.familyId];
+        const terr = op.targetId ? state.territories[op.targetId] : null;
+        // operasyon süresince hafif ısı sızıntısı
+        if (fam) fam.heat = util.clamp(fam.heat + op.heat / op.durationTicks * 0.5, 0, 100);
+        if (op.progress >= 1) resolveOperation(state, rng, op, fam, terr);
+      });
+      // çözülmüş operasyonları temizle (eski kayıtları biriktirme)
+      Object.keys(state.operations).forEach(id => {
+        const o = state.operations[id];
+        if (o.status !== 'active' && state.clock.tick - o.startedTick > 12) delete state.operations[id];
+      });
+    },
+
+    world(state, rng) {
+      // Global polis ısısı, ailelerin ortalama ısısına doğru sürüklenir
+      const fams = Object.values(state.families);
+      const avgHeat = util.avg(fams.map(f => f.heat));
+      state.world.policeHeatGlobal += (avgHeat - state.world.policeHeatGlobal) * 0.1;
+      state.world.policeHeatGlobal = util.clamp(state.world.policeHeatGlobal, 0, 100);
+
+      // Yüksek ısılı ailelere baskın riski
+      fams.forEach(fam => {
+        if (fam.heat >= rules.raidHeatThreshold && rng.chance(rules.raidChancePerTick)) {
+          const seized = Math.round((fam.dirtyMoney) * rng.int(20, 50) / 100);
+          fam.dirtyMoney = Math.max(0, fam.dirtyMoney - seized);
+          fam.heat = util.clamp(fam.heat - 25, 0, 100);
+          // aktif bir üyeyi tutukla
+          const active = familyMembers(state, fam).filter(c => c.status === 'active' && c.role !== 'BOSS');
+          if (active.length) rng.pick(active).status = 'jailed';
+          if (fam.isPlayer || rng.chance(0.4)) report(state, rng, 'raid', { family: fam.name, amount: seized });
+        }
+      });
+    },
+
+    ai(state, rng) {
+      Object.values(state.families).forEach(fam => {
+        if (!fam.aiProfile) return;
+        const p = fam.aiProfile;
+        const busy = busyCrew(state, fam.id);
+        const free = familyMembers(state, fam).filter(c => c.status === 'active' && !busy.has(c.id));
+        if (free.length < 1) return;
+        const chance = rules.aiOpBaseChance + p.aggression * 0.12 + p.greed * 0.06;
+        if (!rng.chance(chance)) return;
+
+        // arketipe göre suç seçimi (basit ağırlık)
+        const pool = data.crimeTypes.filter(c => c.id !== 'hit');
+        const crime = p.aggression > 0.6 ? rng.pick(pool) : rng.pick(pool.filter(c => c.baseRisk < 0.4));
+        const crew = rng.pickN(free, Math.min(free.length, rng.int(1, 2)));
+        // hedef: sahip olduğu ya da komşu tarafsız bir bölge
+        const target = fam.territoryIds.length ? state.territories[rng.pick(fam.territoryIds)] : null;
+        const op = model.createOperation(state, rng, fam.id, crime, crew.map(c => c.id), target ? target.id : null);
+        state.operations[op.id] = op;
+      });
+    },
+  };
+
+  function payFrom(fam, amount) {
+    const fromClean = Math.min(fam.cleanMoney, amount);
+    fam.cleanMoney -= fromClean;
+    const rest = amount - fromClean;
+    fam.dirtyMoney = Math.max(0, fam.dirtyMoney - rest);
+  }
+
+  function resolveOperation(state, rng, op, fam, terr) {
+    const crime = data.crimeTypes.find(c => c.id === op.type) || { skills: ['cunning'] };
+    const crew = op.crewIds.map(id => state.characters[id]).filter(Boolean);
+    const skill = util.avg(crew.map(c => util.avg(crime.skills.map(s => c.stats[s] || 0)))) / 100;
+    const heatFactor = ((fam ? fam.heat : 0) + (terr ? terr.heat : 0)) / 200;
+    op.risk = util.clamp(op.baseRisk + heatFactor - skill * 0.4, 0.02, 0.95);
+    const successChance = 1 - op.risk;
+    const roll = rng.next();
+    const district = terr ? terr.name : 'sokak';
+
+    if (roll < successChance) {
+      op.status = 'success';
+      if (op.expectedReward > 0 && fam) fam.dirtyMoney += op.expectedReward;
+      if (fam) { fam.heat = util.clamp(fam.heat + op.heat * 0.5, 0, 100); fam.reputation = util.clamp(fam.reputation + 1, 0, 100); }
+      if (terr) terr.heat = util.clamp(terr.heat + op.heat * 0.4, 0, 100);
+      if (fam && (fam.isPlayer || rng.chance(0.35))) report(state, rng, op.type === 'hit' ? 'hit' : 'op.success', { family: fam.name, crime: crime.name, district, amount: op.expectedReward });
+    } else if (roll < successChance + op.risk * 0.5) {
+      op.status = 'failed';
+      if (fam) fam.heat = util.clamp(fam.heat + op.heat * 0.3, 0, 100);
+      if (fam && fam.isPlayer) report(state, rng, 'op.failure', { family: fam.name, crime: crime.name, district });
+    } else {
+      op.status = 'busted';
+      if (fam) fam.heat = util.clamp(fam.heat + op.heat, 0, 100);
+      const caught = crew.filter(c => c.role !== 'BOSS');
+      const jailed = caught.length ? rng.pick(caught) : null;
+      if (jailed) jailed.status = 'jailed';
+      if (fam && (fam.isPlayer || rng.chance(0.5))) report(state, rng, 'op.busted', { family: fam.name, crime: crime.name, district, name: jailed ? jailed.name : 'bir adam' });
+    }
+  }
+
+  /* ----------------------------------------------------------------------
+   * engine — tick orkestrasyonu (deterministik faz sırası)
+   * -------------------------------------------------------------------- */
+  const PHASES = ['economy', 'crime', 'world', 'ai'];
+
+  function tick(state) {
+    const rng = util.makeRng(state.rngState);   // save'den birebir devam
+    for (const phase of PHASES) systems[phase](state, rng);
+    advanceClock(state);
+    state.rngState = rng.state;                  // ilerlemiş durumu geri yaz
+    return state;
+  }
+
+  function advanceClock(state) {
+    state.clock.tick += 1;
+    state.clock.day += 1;
+    if (state.clock.day > rules.daysPerYear) { state.clock.day = 1; state.clock.year += 1; }
+  }
+
+  function run(state, ticks) { for (let i = 0; i < ticks; i++) tick(state); return state; }
+
+  const engine = { tick, run, PHASES };
+
+  /* ----------------------------------------------------------------------
+   * persist — Save/Load (LocalStorage) + checksum + migration
+   * -------------------------------------------------------------------- */
+  const KEY_PREFIX = 'ahtapot:save:';
+
+  const MemoryAdapter = (() => { const m = {}; return {
+    get: k => (k in m ? m[k] : null), set: (k, v) => { m[k] = v; }, remove: k => { delete m[k]; },
+    keys: () => Object.keys(m),
+  }; })();
+
+  function LocalStorageAdapter() {
+    const ls = (typeof root.localStorage !== 'undefined') ? root.localStorage : null;
+    if (!ls) return MemoryAdapter; // Node/SSR ortamında otomatik fallback
+    return {
+      get: k => ls.getItem(k), set: (k, v) => ls.setItem(k, v), remove: k => ls.removeItem(k),
+      keys: () => Object.keys(ls).filter(k => k.indexOf(KEY_PREFIX) === 0),
+    };
+  }
+
+  // Şema migration'ları: hedef-versiyon → dönüştürücü
+  const migrations = {
+    // 2: s => { ...; s.meta.version = 2; return s; }
+  };
+
+  function runMigrations(state) {
+    while (state.meta.version < CURRENT_VERSION) {
+      const fn = migrations[state.meta.version + 1];
+      if (!fn) { state.meta.version = CURRENT_VERSION; break; }
+      state = fn(state);
+      state.meta.version += (state.meta.version < CURRENT_VERSION ? 1 : 0);
+    }
+    return state;
+  }
+
+  function serialize(state) {
+    const json = JSON.stringify(state);
+    return JSON.stringify({ version: state.meta.version, checksum: util.fnv1a(json), savedAt: Date.now(), state: json });
+  }
+
+  function deserialize(envelopeStr) {
+    const env = JSON.parse(envelopeStr);
+    if (util.fnv1a(env.state) !== env.checksum) throw new Error('Save bozuk: checksum uyuşmuyor');
+    let state = JSON.parse(env.state);
+    return runMigrations(state);
+  }
+
+  function save(slot, state, adapter) {
+    adapter = adapter || LocalStorageAdapter();
+    adapter.set(KEY_PREFIX + slot, serialize(state));
+    return true;
+  }
+
+  function load(slot, adapter) {
+    adapter = adapter || LocalStorageAdapter();
+    const raw = adapter.get(KEY_PREFIX + slot);
+    if (!raw) return null;
+    return deserialize(raw);
+  }
+
+  function listSaves(adapter) {
+    adapter = adapter || LocalStorageAdapter();
+    return adapter.keys().map(k => k.replace(KEY_PREFIX, ''));
+  }
+
+  function exportSave(state) { return serialize(state); }
+  function importSave(str) { return deserialize(str); }
+
+  const persist = { save, load, listSaves, exportSave, importSave, serialize, deserialize, runMigrations, LocalStorageAdapter, MemoryAdapter, CURRENT_VERSION };
+
+  /* ----------------------------------------------------------------------
+   * events — hafif EventBus (UI faz 3'te abone olacak)
+   * -------------------------------------------------------------------- */
+  const events = (() => {
+    const map = {};
+    return {
+      on(type, fn) { (map[type] = map[type] || []).push(fn); return () => this.off(type, fn); },
+      off(type, fn) { if (map[type]) map[type] = map[type].filter(f => f !== fn); },
+      emit(type, payload) { (map[type] || []).forEach(fn => fn(payload)); },
+    };
+  })();
+
+  /* ----------------------------------------------------------------------
+   * test — gömülü self-test harness (determinizm + save round-trip)
+   * -------------------------------------------------------------------- */
+  function selfTest() {
+    const results = [];
+    const check = (name, cond) => { results.push({ name, ok: !!cond }); };
+
+    // 1) RNG determinizmi
+    const r1 = util.makeRng(7), r2 = util.makeRng(7);
+    const seq1 = [r1.next(), r1.next(), r1.next()], seq2 = [r2.next(), r2.next(), r2.next()];
+    check('RNG aynı seed → aynı dizi', JSON.stringify(seq1) === JSON.stringify(seq2));
+
+    // 2) Aynı seed → aynı dünya (50 tick sonra birebir)
+    const a = run(createNewGame(123, { now: 1000 }), 50);
+    const b = run(createNewGame(123, { now: 1000 }), 50);
+    check('Simülasyon determinizmi (50 tick)', JSON.stringify(a) === JSON.stringify(b));
+
+    // 3) Farklı seed → farklı dünya
+    const c = run(createNewGame(999, { now: 1000 }), 50);
+    check('Farklı seed → farklı dünya', JSON.stringify(a) !== JSON.stringify(c));
+
+    // 4) Save/Load round-trip (MemoryAdapter)
+    const g = createNewGame(42, { now: 2000 });
+    run(g, 25);
+    persist.save('test', g, MemoryAdapter);
+    const loaded = persist.load('test', MemoryAdapter);
+    check('Save/Load round-trip eşit', JSON.stringify(g) === JSON.stringify(loaded));
+
+    // 5) Yüklenen oyun aynı şekilde devam eder (determinizm save sonrası korunur)
+    const contA = run(JSON.parse(JSON.stringify(loaded)), 20);
+    const contB = run(g, 20);
+    check('Load sonrası devam determinizmi', JSON.stringify(contA) === JSON.stringify(contB));
+
+    // 6) Checksum bozulmasını yakalar
+    let caught = false;
+    try { persist.deserialize('{"version":1,"checksum":"deadbeef","state":"{}"}'); } catch (e) { caught = true; }
+    check('Bozuk save checksum ile reddedilir', caught);
+
+    // 7) Yaşayan dünya gerçekten ilerliyor
+    const live = createNewGame(5, { now: 3000 });
+    const before = JSON.stringify({ t: live.clock.tick, n: live.world.newsFeed.length });
+    run(live, 40);
+    check('Saat ilerledi', live.clock.tick === 40);
+    check('Dünya olay üretti (haber akışı doldu)', live.world.newsFeed.length > 1);
+
+    const passed = results.filter(r => r.ok).length;
+    const total = results.length;
+    const log = (typeof console !== 'undefined') ? console : { log: () => {} };
+    log.log('%cAHTAPOT self-test: ' + passed + '/' + total, passed === total ? 'color:#6fbf73' : 'color:#d9534f');
+    results.forEach(r => log.log((r.ok ? '  ✓ ' : '  ✗ ') + r.name));
+    return { passed, total, ok: passed === total, results };
+  }
+
+  /* ----------------------------------------------------------------------
+   * Public API
+   * -------------------------------------------------------------------- */
+  root.AHTAPOT = {
+    version: '0.2-phase1',
+    util, rules, data, model,
+    state: { createNewGame, CURRENT_VERSION, playerFamily, helpers: { familyMembers, busyCrew, totalMoney } },
+    story, systems, engine, persist, events,
+    test: { selfTest },
+  };
+})();
+</script>
+
+<script id="ahtapot-bootstrap">
+/* Faz 1 demo bağlama (UI değil): çekirdek yüklendiğini göster, mini haber akışı.
+   Gerçek render katmanı faz 3'te gelecek. */
+(function () {
+  if (typeof document === 'undefined' || !root_has('AHTAPOT')) return;
+  function root_has(k) { return typeof window !== 'undefined' && k in window; }
+  const A = window.AHTAPOT;
+  const statusEl = document.getElementById('status');
+  const newsEl = document.getElementById('news');
+
+  // Demo oyun başlat (deterministik seed) ve birkaç gün simüle et
+  const test = A.test.selfTest();
+  const g = A.state.createNewGame(Date.now() & 0xffff);
+  A.engine.run(g, 20);
+
+  const fam = A.state.playerFamily(g);
+  statusEl.innerHTML =
+    'Self-test: <span class="' + (test.ok ? 'ok">' : 'err">') + test.passed + '/' + test.total + '</span> &nbsp;|&nbsp; ' +
+    'Çekirdek <code>v' + A.version + '</code> hazır.<br>' +
+    'Gün: <code>' + g.clock.day + '</code> · Yıl <code>' + g.clock.year + '</code><br>' +
+    'Aile: <code>' + fam.name + '</code> · Temiz <code>' + fam.cleanMoney + '₺</code> · Kirli <code>' + fam.dirtyMoney + '₺</code> · Isı <code>' + fam.heat.toFixed(0) + '</code><br>' +
+    'Bölge: <code>' + fam.territoryIds.length + '</code> · Üye: <code>' + fam.memberIds.length + '</code> · Rakip aile: <code>' + (Object.keys(g.families).length - 1) + '</code>';
+
+  newsEl.innerHTML = g.world.newsFeed.slice(0, 20).map(n => '<div>[G' + n.tick + '] ' + n.text + '</div>').join('') || '<div>Henüz haber yok…</div>';
+})();
+</script>
+</body>
+</html>
