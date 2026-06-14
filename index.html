@@ -144,6 +144,8 @@
     .modal p { font-size:13px; color:var(--fg); line-height:1.5; margin:0 0 14px; }
     .modal .opt { margin-top:8px; }
     .modal .opt .d { font-size:10.5px; color:var(--muted); margin-top:3px; }
+    .evbadge { display:inline-block; font-size:9.5px; font-weight:700; letter-spacing:1.2px; padding:3px 9px;
+      border-radius:20px; border:1px solid var(--line2); margin-bottom:8px; }
     #toast { position:absolute; left:50%; bottom:120px; transform:translateX(-50%) translateY(20px);
       background:rgba(20,10,10,.96); border:1px solid var(--line2); color:var(--fg); font-size:12.5px;
       padding:10px 16px; border-radius:12px; max-width:88%; text-align:center; opacity:0; pointer-events:none;
@@ -626,6 +628,12 @@
       'victory': [
         '👑👑 ZAFER! Tüm endgame hedefleri tamamlandı; hanedanlık efsaneye dönüştü.',
       ],
+      'life': [
+        '{text}',
+      ],
+      'memory': [
+        '📌 {text}',
+      ],
     },
   };
 
@@ -757,7 +765,7 @@
   /* ----------------------------------------------------------------------
    * state — yeni oyun kurulumu (deterministik, seed'e bağlı)
    * -------------------------------------------------------------------- */
-  const CURRENT_VERSION = 6;
+  const CURRENT_VERSION = 7;
 
   function createNewGame(seed, opts) {
     opts = opts || {};
@@ -777,6 +785,9 @@
       dynasty: { bossId: null, heirs: [], generation: 1, legacyPoints: 0, perks: [], history: [], collapsed: false },
       achievements: { unlocked: {} },
       stats: { assassinations: 0, warsWon: 0, escapes: 0, prisonFightsWon: 0, molesCaught: 0, children: 0, peakWealth: 0 },
+      eventQueue: [],                                   // bekleyen yaşam kararları (LEE)
+      eventState: { fired: {}, counts: {} },            // cooldown/once geçmişi
+      legacy: { memories: [], firsts: {} },             // Legacy Memories (gelecek sistem için)
       eventLog: [],
       flags: {},
     };
@@ -1429,6 +1440,7 @@
 
   function moleAct(state, rng, fam, c) {
     const boss = state.characters[state.dynasty.bossId];
+    if (fam.isPlayer) recordMemory(state, 'first_betrayal', 'İlk ihanet: ' + c.name, 7);
     const r = rng.next();
     if (r < 0.35) {                                   // polise ihbar
       fam.heat = util.clamp(fam.heat + 12, 0, 100); c.suspicion = Math.min(100, c.suspicion + 8);
@@ -1573,6 +1585,7 @@
       victim.status = 'dead'; if (victim.id === state.dynasty.bossId) state.flags.successionPending = 1;
       adjustStanding(state, famId, targetId, -25); target.armedMen = Math.max(0, target.armedMen - 2);
       if (fam.isPlayer && state.stats) state.stats.assassinations++;
+      if (fam.isPlayer) recordMemory(state, 'first_kill', 'İlk cinayet: ' + victim.name, 10);
       if (fam.isPlayer || target.isPlayer) report(state, rng, 'assassination', { family: fam.name, rival: target.name, name: victim.name });
     } else { fam.heat = util.clamp(fam.heat + 15, 0, 100); adjustStanding(state, famId, targetId, -12); }
     if (target.aiProfile) target.aiProfile.vengeance = util.clamp(target.aiProfile.vengeance + 0.2, 0, 1);
@@ -1688,7 +1701,7 @@
     c.status = 'jailed'; c.isArrested = true;
     c.prison = { sentence: months, respect: 0, comfort: 0, guards: 0, recruits: [] };
     const fam = state.families[c.familyId];
-    if (fam && fam.isPlayer) report(state, rng, 'arrest', { name: c.name, months });
+    if (fam && fam.isPlayer) { report(state, rng, 'arrest', { name: c.name, months }); recordMemory(state, 'first_arrest', 'İlk tutuklanma: ' + c.name, 8); }
   }
 
   // Tahliye: hapisten çıkar, devşirilen mahkumları ekibe katar
@@ -1805,6 +1818,7 @@
     spouse.spouseId = boss.id; state.characters[spouse.id] = spouse;
     boss.spouseId = spouse.id;
     report(state, rng, 'marry', { name: boss.name, spouse: spouse.name });
+    recordMemory(state, 'first_marriage', 'İlk evlilik: ' + boss.name + ' & ' + spouse.name, 5);
     return { ok: true, spouseId: spouse.id };
   }
 
@@ -1836,6 +1850,7 @@
     boss.childrenIds.push(child.id);
     if (state.stats) state.stats.children++;
     report(state, rng, 'birth', { child: child.name, trait });
+    recordMemory(state, 'first_child', 'İlk çocuk: ' + child.name, 6);
     return { ok: true, childId: child.id, trait };
   }
 
@@ -1885,6 +1900,7 @@
     state.dynasty.history.push({ generation: state.dynasty.generation, bossName: heir.name, startedYear: state.clock.year, peakWealth: totalMoney(fam), note: 'Koltuğu devraldı.' });
     const tpl = reason === 'insane' ? 'succession.insane' : reason === 'life' ? 'succession.life' : 'succession';
     report(state, rng, tpl, { heir: heir.name, boss: oldBoss ? oldBoss.name : '—', gen: state.dynasty.generation });
+    recordMemory(state, 'succession_g' + state.dynasty.generation, 'Aileyi devralma: ' + heir.name + ' (N' + state.dynasty.generation + ')', 12, true);
   }
 
   // Uluslararası kaçış: rüşvetle başka ülkeye geç (redNotice + iade riski)
@@ -1910,7 +1926,7 @@
   // Dynasty Score (servet + bölge + politik güç + sadakat + nesil)
   function dynastyScore(state) {
     const fam = playerFamily(state); if (!fam) return 0;
-    return Math.round(totalMoney(fam) / 10000 + fam.territoryIds.length * 5 + corruptionLevel(fam) * 2 + avgLoyalty(state, fam) + state.dynasty.generation * 20 + (state.stats ? state.stats.assassinations * 3 : 0));
+    return Math.round(totalMoney(fam) / 10000 + fam.territoryIds.length * 5 + corruptionLevel(fam) * 2 + avgLoyalty(state, fam) + state.dynasty.generation * 20 + (state.stats ? state.stats.assassinations * 3 : 0) + legacyTotal(state));
   }
 
   const achievementHelpers = { totalMoney, player: playerFamily, corruptionLevel, alliesOf, familyMembers };
@@ -2012,6 +2028,338 @@
     }
   }
 
+  /* ----------------------------------------------------------------------
+   * LIFE EVENT ENGINE — yaşanan hayat katmanı (BitLife dokusu)
+   * -------------------------------------------------------------------- */
+  function activeNonBoss(state, fam) { return familyMembers(state, fam).filter(c => c.status === 'active' && c.role !== 'BOSS'); }
+
+  // Legacy Memory: kilometre taşlarını karakter/hanedan tarihçesine kaydeder
+  function recordMemory(state, key, text, weight, repeatable) {
+    if (!state.legacy) state.legacy = { memories: [], firsts: {} };
+    if (!repeatable) { if (state.legacy.firsts[key]) return false; state.legacy.firsts[key] = state.clock.tick + 1; }  // +1 → tick 0'da bile truthy
+    state.legacy.memories.push({ tick: state.clock.tick, year: state.clock.year, gen: state.dynasty.generation, key, text, weight: weight || 0 });
+    if (state.legacy.memories.length > 80) state.legacy.memories.shift();
+    return true;
+  }
+  const legacyTotal = state => (state.legacy ? state.legacy.memories.reduce((s, m) => s + (m.weight || 0), 0) : 0);
+
+  // Seçim etkilerini gerçek state'e uygular (clamp'li, deterministik)
+  function applyEffects(state, rng, eff, ctx) {
+    if (!eff) return;
+    const f = playerFamily(state), b = state.characters[state.dynasty.bossId], C = util.clamp;
+    if (!f || !b) return; ctx = ctx || {};
+    if (eff.heat != null) f.heat = C(f.heat + eff.heat, 0, 100);
+    if (eff.federalHeat != null) f.federalHeat = C((f.federalHeat || 0) + eff.federalHeat, 0, 100);
+    if (eff.reputation != null) f.reputation = C(f.reputation + eff.reputation, 0, 100);
+    if (eff.dynastyRep != null) f.reputation = C(f.reputation + eff.dynastyRep, 0, 100);
+    if (eff.happiness != null) b.attributes.happiness = C(b.attributes.happiness + eff.happiness, 0, 100);
+    if (eff.health != null) { b.attributes.health = C(b.attributes.health + eff.health, 0, 100); b.health = b.attributes.health; }
+    if (eff.looks != null) b.attributes.looks = C(b.attributes.looks + eff.looks, 0, 100);
+    if (eff.intelligence != null) b.attributes.intelligence = C(b.attributes.intelligence + eff.intelligence, 0, 100);
+    if (eff.paranoia != null) b.vitals.paranoia = C(b.vitals.paranoia + eff.paranoia, 0, 100);
+    if (eff.energy != null) b.vitals.energy = C(b.vitals.energy + eff.energy, 0, 100);
+    if (eff.stress != null) b.psyche.stress = C(b.psyche.stress + eff.stress, 0, 100);
+    if (eff.trauma != null) b.psyche.trauma = C(b.psyche.trauma + eff.trauma, 0, 100);
+    if (eff.addiction != null) b.psyche.addiction = C(b.psyche.addiction + eff.addiction, 0, 100);
+    if (eff.conscience != null) b.psyche.conscience = C(b.psyche.conscience + eff.conscience, 0, 100);
+    if (eff.clean != null) f.cleanMoney = eff.clean >= 0 ? f.cleanMoney + eff.clean : Math.max(0, f.cleanMoney + eff.clean);
+    if (eff.dirty != null) f.dirtyMoney = eff.dirty >= 0 ? f.dirtyMoney + eff.dirty : Math.max(0, f.dirtyMoney + eff.dirty);
+    if (eff.crewLoyalty != null) {
+      const ts = (ctx.targetId && state.characters[ctx.targetId]) ? [state.characters[ctx.targetId]] : activeNonBoss(state, f);
+      ts.forEach(c => { if (c.skills) c.skills.loyalty = C(c.skills.loyalty + eff.crewLoyalty, 1, 100); });
+    }
+    if (eff.familyRel != null && ctx.targetId) b.relations[ctx.targetId] = C((b.relations[ctx.targetId] || 0) + eff.familyRel, -100, 100);
+    if (eff.childLoyalty != null && ctx.targetId && state.characters[ctx.targetId]) { const k = state.characters[ctx.targetId]; if (k.skills) k.skills.loyalty = C(k.skills.loyalty + eff.childLoyalty, 1, 100); }
+    if (eff.childIntel != null && ctx.targetId && state.characters[ctx.targetId]) { const k = state.characters[ctx.targetId]; k.attributes.intelligence = C(k.attributes.intelligence + eff.childIntel, 1, 100); }
+    if (eff.spawnMole) { const cn = activeNonBoss(state, f); if (cn.length) { const m = rng.pick(cn); m.moleRisk = C(m.moleRisk + 45, 0, 100); if (m.moleRisk >= rules.moleConvertThreshold) m.isMole = true; } }
+    if (eff.jailMember) { const cn = activeNonBoss(state, f); if (cn.length) arrest(state, rng, rng.pick(cn), rng.int(rules.prisonSentenceMin, rules.prisonSentenceMax)); }
+    if (eff.triggerRaid) { const s = Math.round(f.dirtyMoney * 0.3); f.dirtyMoney = Math.max(0, f.dirtyMoney - s); f.heat = C(f.heat + 10, 0, 100); const cn = activeNonBoss(state, f); if (cn.length) rng.pick(cn).status = 'jailed'; }
+    if (eff.marry) doMarry(state, rng);
+    if (eff.grantBusiness) { const bt = data.businessTypes.find(t => t.id === eff.grantBusiness); if (bt) { const nb = model.createBusiness(state, f.id, bt); state.businesses[nb.id] = nb; f.businessIds.push(nb.id); } }
+    if (eff.setHeir && ctx.targetId) doSetHeir(state, ctx.targetId);
+    if (eff.ceasefireRival && ctx.rivalId) { setTreaty(state, f.id, ctx.rivalId, 'ceasefire'); adjustStanding(state, f.id, ctx.rivalId, 10); }
+    if (eff.flag) state.flags[eff.flag.k] = eff.flag.v;
+  }
+
+  // Yaşa bağlı yıllık olay yoğunluğu (cadence)
+  function eventCountForAge(age, rng) {
+    if (age <= 12) return rng.int(0, 1);
+    if (age <= 25) return rng.int(2, 4);
+    if (age <= 50) return rng.int(1, 3);
+    return rng.int(1, 2);
+  }
+
+  // Yaşam olayı seçici — uygunluk + cooldown + ağırlık + kategori çeşitliliği
+  class LifeEventSystem {
+    populate(state, rng) {
+      const b = state.characters[state.dynasty.bossId];
+      if (!b || b.status === 'dead') return;
+      if (state.eventQueue.length >= 16) return;               // taşma koruması
+      const year = state.clock.year;
+      const n = eventCountForAge(b.age, rng);
+      if (n <= 0) return;
+      let pool = data.lifeEvents.filter(def => {
+        if (def.once && state.eventState.fired[def.id]) return false;
+        const last = state.eventState.fired[def.id];
+        if (last != null && def.cooldown && (year - last) < def.cooldown) return false;
+        try { return def.requires ? def.requires(state) : true; } catch (e) { return false; }
+      });
+      const usedCat = {};
+      for (let i = 0; i < n && pool.length; i++) {
+        const w = d => d.weight * (usedCat[d.category] ? 0.35 : 1);
+        const total = pool.reduce((s, d) => s + w(d), 0);
+        let r = rng.next() * total, choice = pool[pool.length - 1];
+        for (const d of pool) { r -= w(d); if (r <= 0) { choice = d; break; } }
+        usedCat[choice.category] = 1;
+        let ctx = {}; try { ctx = choice.resolveCtx ? choice.resolveCtx(state, rng) : {}; } catch (e) { ctx = {}; }
+        state.eventQueue.push({ defId: choice.id, year, ctx });
+        state.eventState.fired[choice.id] = year;
+        pool = pool.filter(d => d !== choice);
+      }
+    }
+  }
+
+  // Bekleyen kararı çöz: effects/outcomes uygula, anlatı + legacy kaydı, kuyruğu kaydır
+  function doResolveEvent(state, rng, optionId) {
+    const inst = state.eventQueue[0]; if (!inst) return { ok: false, reason: 'no_event' };
+    const def = data.lifeEvents.find(e => e.id === inst.defId);
+    if (!def) { state.eventQueue.shift(); return { ok: false, reason: 'bad_event' }; }
+    const opt = def.options.find(o => o.id === optionId) || def.options[0];
+    let text = '';
+    if (opt.outcomes && opt.outcomes.length) {
+      const roll = rng.next(); let acc = 0, chosen = opt.outcomes[opt.outcomes.length - 1];
+      for (const o of opt.outcomes) { acc += o.chance; if (roll < acc) { chosen = o; break; } }
+      applyEffects(state, rng, chosen.effects, inst.ctx);
+      text = typeof chosen.text === 'function' ? chosen.text(inst.ctx) : (chosen.text || (def.title + ' — ' + opt.label));
+    } else {
+      applyEffects(state, rng, opt.effects, inst.ctx);
+      text = typeof opt.resultText === 'function' ? opt.resultText(inst.ctx) : (opt.resultText || (def.title + ' — ' + opt.label));
+    }
+    report(state, rng, 'life', { text });
+    if (def.legacyWeight) { const m = recordMemory(state, def.id, def.title, def.legacyWeight, !!def.legacyRepeatable); if (m) report(state, rng, 'memory', { text: def.title }); }
+    state.eventQueue.shift();
+    return { ok: true, text, hasMore: state.eventQueue.length > 0 };
+  }
+
+  // 7 kategorili yaşam olayı kataloğu (gramer; saf veri+predicate, serileştirilmez)
+  function buildLifeEvents() {
+    const P = s => playerFamily(s), B = s => s.characters[s.dynasty.bossId];
+    const spouse = s => { const b = B(s); return b && b.spouseId ? s.characters[b.spouseId] : null; };
+    const kids = s => { const b = B(s); return (b ? b.childrenIds : []).map(id => s.characters[id]).filter(c => c && c.status !== 'dead'); };
+    const adultKids = s => kids(s).filter(c => c.age >= rules.childAdultAge);
+    const warRival = s => { const f = P(s); return rivalsOf(s).find(r => H_relTreaty(f, r.id) === 'war'); };
+    const rivalsOf = s => Object.values(s.families).filter(x => !x.isPlayer);
+    const H_relTreaty = (f, id) => relationOf(f, id).treaty;
+    const o = (id, label, hint, effects, outcomes, resultText) => ({ id, label, hint, effects, outcomes, resultText });
+
+    return [
+      /* 1 — Aile */
+      { id: 'fam.father_ill', category: 'family', title: 'Baba hastalandı', weight: 8, cooldown: 6, requires: s => B(s).age >= 16 && B(s).age <= 58,
+        prompt: () => 'Baban ağır hastalandı. Geleneksel sokak doktoru mu, pahalı uzmanlar mı, yoksa kader mi?',
+        options: [
+          o('docs', 'En iyi doktorları tut', 'Güvenli ama pahalı', { clean: -8000, happiness: 6 }, null, 'En iyi doktorlar çağrıldı; baban biraz toparladı.'),
+          o('healer', 'Şehir efsanesi şifacı', 'Belirsiz sonuç', null, [{ chance: 0.55, effects: { happiness: 5 }, text: 'Şifacı işe yaradı; aile rahatladı.' }, { chance: 0.45, effects: { trauma: 8, happiness: -10 }, text: 'Şifacı sahteydi; durum kötüleşti.' }]),
+          o('fate', 'Kadere bırak', 'Vicdanını sızlatır', { conscience: -15, happiness: -8, reputation: -3 }, null, 'Hiçbir şey yapmadın; içini bir taş kapladı.'),
+        ] },
+      { id: 'fam.sibling_debt', category: 'family', title: 'Kardeş borca battı', weight: 7, cooldown: 4, requires: () => true,
+        prompt: () => 'Kardeşin kumar/borç batağında; tefeciler peşinde.',
+        options: [
+          o('pay', 'Borcunu kapat', 'Ailen hoş karşılar', { clean: -6000, reputation: 4 }, null, 'Borcu kapattın; aile minnettar.'),
+          o('lesson', 'Ders olsun', 'Sert ama caydırıcı', { reputation: 6, conscience: -8 }, null, 'Kardeşini kaderine bıraktın; sokak not aldı.'),
+          o('muscle', 'Tefeciyi sustur', 'Polis dikkatini çekebilir', { heat: 10, dirty: -1000, reputation: 5 }, null, 'Tefeciyi hizaya soktun.'),
+        ] },
+      { id: 'fam.spouse_suspicion', category: 'family', title: 'Eş sadakatsizlik şüphesi', weight: 6, cooldown: 4, requires: s => !!spouse(s),
+        resolveCtx: s => { const sp = spouse(s); return { targetId: sp.id, target: sp.name }; },
+        prompt: ctx => esc2(ctx.target) + ' son zamanlarda mesafeli. İçine bir kurt düştü.',
+        options: [
+          o('trust', 'Güven', 'İlişkini güçlendirir', { familyRel: 10, happiness: 4 }, null, 'Güvendin; aranız tatlandı.'),
+          o('spy', 'Takip ettir', 'Riskli', null, [{ chance: 0.5, effects: { paranoia: 8, flag: { k: 'spouseClear', v: 1 } }, text: 'Bir şey çıkmadı; ama huzurun kaçtı.' }, { chance: 0.5, effects: { familyRel: -20, paranoia: 14 }, text: 'Takip açığa çıktı; güven çatladı.' }]),
+          o('confront', 'Yüzleş', 'Belirsiz', null, [{ chance: 0.5, effects: { familyRel: 8 }, text: 'Konuştunuz; hava temizlendi.' }, { chance: 0.5, effects: { familyRel: -25, happiness: -10 }, text: 'Kavga çıktı; çatlak derinleşti.' }]),
+        ] },
+      { id: 'fam.child_expelled', category: 'family', title: 'Çocuk okuldan atıldı', weight: 6, cooldown: 3, requires: s => kids(s).some(c => c.age >= 6 && c.age < rules.childAdultAge),
+        resolveCtx: s => { const c = kids(s).find(k => k.age >= 6 && k.age < rules.childAdultAge); return { targetId: c.id, target: c.name }; },
+        prompt: ctx => esc2(ctx.target) + ' okuldan atıldı. Ne yaparsın?',
+        options: [
+          o('bribe', 'Okulu hallet', 'Pahalı, ailene iyi gelir', { clean: -5000, familyRel: 8 }, null, 'Müdürü ikna ettin; mesele kapandı.'),
+          o('street', 'Sokağa al, işi öğret', 'Hanedan için tohum', { childLoyalty: 10, familyRel: 4 }, null, 'Çocuğu yanına aldın; sokak okulu başladı.'),
+          o('ignore', 'Görmezden gel', 'Güvenli ama soğuk', { familyRel: -10, happiness: -4 }, null, 'Umursamadın; çocuk içine kapandı.'),
+        ] },
+
+      /* 2 — İlişki */
+      { id: 'rel.met_someone', category: 'relationship', title: 'Yeni biriyle tanıştın', weight: 6, cooldown: 3, requires: s => !spouse(s) && B(s).age >= 18,
+        prompt: () => 'Bir gece kulübünde biri ilgini çekti.',
+        options: [
+          o('pursue', 'Peşine düş', 'Mutluluk artar', { happiness: 8, energy: -4 }, null, 'Yeni bir kıvılcım; içini ısıttı.'),
+          o('marry', 'Doğrudan evlen', 'Hanedan için adım', { marry: true, happiness: 6 }, null, 'Hızlı karar: dünya evine girdin.'),
+          o('focus', 'İşe odaklan', 'Güvenli', { reputation: 4 }, null, 'Aşk beklesin; iş büyüyor.'),
+        ] },
+      { id: 'rel.partner_marriage', category: 'relationship', title: 'Sevgili evlenmek istiyor', weight: 5, cooldown: 5, requires: s => !spouse(s) && B(s).age >= 20,
+        prompt: () => 'Sevgilin artık ciddi bir adım istiyor.',
+        options: [
+          o('yes', 'Evlen', 'Ailen hoş karşılar', { marry: true, happiness: 10 }, null, 'Düğün kuruldu; hanedanın temeli atıldı.'),
+          o('wait', 'Beklet', 'İlişkini yıpratır', { happiness: -6 }, null, 'Oyaladın; arada gerginlik var.'),
+        ] },
+      { id: 'rel.ex_returned', category: 'relationship', title: 'Eski sevgili geri döndü', weight: 5, cooldown: 4, requires: s => !!spouse(s),
+        resolveCtx: s => { const sp = spouse(s); return { targetId: sp.id, target: sp.name }; },
+        prompt: () => 'Eski alevin kapına dayandı.',
+        options: [
+          o('reject', 'Geri çevir', 'Evliliğini korur', { familyRel: 12, happiness: -4 }, null, 'Kapıyı kapattın; eşin değerini gördü.'),
+          o('secret', 'Gizlice buluş', 'Riskli', null, [{ chance: 0.5, effects: { happiness: 10, flag: { k: 'affair', v: 1 } }, text: 'Tehlikeli bir kaçamak; kimse bilmiyor.' }, { chance: 0.5, effects: { familyRel: -35, happiness: -12, paranoia: 10 }, text: 'Yakalandın; ev savaş alanına döndü.' }]),
+        ] },
+
+      /* 3 — Sokak & Mafya */
+      { id: 'street.informant', category: 'street', title: 'Muhbir ihbar yapacak', weight: 8, cooldown: 2, requires: s => P(s).heat > 30,
+        prompt: () => 'Bir muhbirin seni ispiyonlamak üzere olduğu fısıldanıyor.',
+        options: [
+          o('silence', 'Sustur', 'Polis dikkatini çekebilir', { heat: 12, dirty: -3000, conscience: -10, reputation: 6 }, null, 'Muhbir ortadan kayboldu; mesaj net.'),
+          o('buy', 'Satın al', 'Pahalı ama temiz', { clean: -10000, heat: -8 }, null, 'Sustun payı verildi; dil tutuldu.'),
+          o('ignore', 'Aldırma', 'Riskli', null, [{ chance: 0.5, effects: { triggerRaid: true }, text: 'İhbar gitti; kapına baskın geldi!' }, { chance: 0.5, effects: { heat: -5 }, text: 'Blöftü; bir şey olmadı.' }]),
+        ] },
+      { id: 'street.gang_offer', category: 'street', title: 'Mahalle çetesi teklif sundu', weight: 6, cooldown: 4, requires: s => P(s).rank < 3,
+        prompt: () => 'Yerel bir çete ortaklık teklif ediyor.',
+        options: [
+          o('accept', 'Kabul et', 'Hızlı kazanç, ısı riski', { dirty: 5000, heat: 10, reputation: 5 }, null, 'Anlaşma kuruldu; sokakta ağırlığın arttı.'),
+          o('rob', 'Onları soy', 'Riskli', null, [{ chance: 0.5, effects: { dirty: 8000, heat: 15 }, text: 'Baskını sen yaptın; kasaları senin.' }, { chance: 0.5, effects: { health: -15, heat: 10 }, text: 'Tuzağa düştün; yara aldın.' }]),
+          o('decline', 'Reddet', 'Güvenli', { reputation: 2 }, null, 'Kibarca reddettin.'),
+        ] },
+      { id: 'street.rival_truce', category: 'street', title: 'Rakip aile uzlaşmak istiyor', weight: 5, cooldown: 3, requires: s => !!warRival(s),
+        resolveCtx: s => { const r = warRival(s); return { rivalId: r.id, target: r.name }; },
+        prompt: ctx => esc2(ctx.target) + ' ateşkes masası kurmak istiyor.',
+        options: [
+          o('accept', 'Ateşkes imzala', 'Kan durur', { ceasefireRival: true, reputation: -3 }, null, 'Silahlar sustu; geçici barış.'),
+          o('refuse', 'Reddet, savaşa devam', 'Riskli ama itibarlı', { reputation: 6 }, null, 'Masayı devirdin; savaş sürüyor.'),
+        ] },
+      { id: 'street.muscle_in', category: 'street', title: 'Yeni sokak fırsatı', weight: 6, cooldown: 2, requires: s => P(s).territoryIds.length < 9,
+        prompt: () => 'Sahipsiz bir sokakta haraç boşluğu var.',
+        options: [
+          o('extort', 'Bölgeye gir', 'Riskli kazanç', null, [{ chance: 0.55, effects: { dirty: 6000, heat: 12 }, text: 'Sokağı kaptın; haraç akıyor.' }, { chance: 0.45, effects: { heat: 18, jailMember: true }, text: 'İşler kızıştı; bir adamın içeri düştü.' }]),
+          o('wait', 'Bekle', 'Güvenli', null, null, 'Zamanı değil dedin.'),
+        ] },
+
+      /* 4 — Polis & Devlet */
+      { id: 'state.prosecutor_deal', category: 'state', title: 'Savcı iş birliği teklif etti', weight: 6, cooldown: 5, requires: s => P(s).heat > 40,
+        prompt: () => 'Bir savcı sana "konuşursan" dokunulmazlık vaat ediyor.',
+        options: [
+          o('reject', 'Reddet', 'İtibarını korur', { heat: 8, reputation: 5 }, null, 'Ağzını açmadın; sokak saygı duydu.'),
+          o('flip', 'Anlaş (muhbir ol)', 'Onursuz ama güvenli', { heat: -20, reputation: -15, conscience: -20, flag: { k: 'informant', v: 1 } }, null, 'İsim verdin; rahatladın ama lekelendin.'),
+          o('bribe', 'Rüşvetle çevir', 'Pahalı', { clean: -20000, federalHeat: -10 }, null, 'Savcının dosyası buharlaştı.'),
+        ] },
+      { id: 'state.raid_warning', category: 'state', title: 'Polis baskını riski', weight: 6, cooldown: 2, requires: s => P(s).heat > 50,
+        prompt: () => 'Yakında bir baskın olabileceği haberi geldi.',
+        options: [
+          o('laylow', 'Sin', 'Güvenli', { heat: -15, dirty: -2000 }, null, 'Operasyonları dondurdun; sular durulana dek beklersin.'),
+          o('bribe', 'Polisi ayarla', 'Pahalı', { clean: -12000, heat: -10 }, null, 'İçeriden ayarladın; baskın iptal.'),
+          o('defy', 'Umursama', 'Riskli', null, [{ chance: 0.5, effects: { triggerRaid: true }, text: 'Baskın geldi!' }, { chance: 0.5, effects: { reputation: 8, heat: -5 }, text: 'Blöftü; dimdik ayaktasın.' }]),
+        ] },
+      { id: 'state.political_connection', category: 'state', title: 'Siyasi bağlantı fırsatı', weight: 4, cooldown: 6, requires: s => P(s).cleanMoney > 25000,
+        prompt: () => 'Bir aracı, bir politikacıya köprü kurmayı öneriyor.',
+        options: [
+          o('invest', 'Yatırım yap', 'Uzun vadeli güç', { clean: -25000, federalHeat: -5, flag: { k: 'politicalFavor', v: 1 } }, null, 'Köprü kuruldu; ileride işine yarayacak.'),
+          o('pass', 'Vazgeç', 'Güvenli', null, null, 'Şimdilik geçtin.'),
+        ] },
+      { id: 'state.tax_audit', category: 'state', title: 'Vergi denetimi kapıda', weight: 6, cooldown: 3, requires: s => P(s).businessIds.length > 0,
+        prompt: () => 'Müfettişler işletmelerini mercek altına alıyor.',
+        options: [
+          o('lawyer', 'Avukat tut', 'Güvenli', { clean: -6000, heat: -2 }, null, 'Avukatlar evrakı temizledi.'),
+          o('cook', 'Defterleri pişir', 'Riskli', null, [{ chance: 0.5, effects: { clean: 4000 }, text: 'Numara tuttu; üstüne kâr ettin.' }, { chance: 0.5, effects: { heat: 15, federalHeat: 8 }, text: 'Yakalandın; dosya federallere gitti.' }]),
+        ] },
+
+      /* 5 — Kişisel */
+      { id: 'pers.gambling', category: 'personal', title: 'Kumar masası çağırıyor', weight: 6, cooldown: 2, requires: s => true,
+        prompt: () => 'Yüksek bahisli bir masaya davetlisin.',
+        options: [
+          o('play', 'Masaya otur', 'Büyük kazanç potansiyeli, riskli', null, [{ chance: 0.45, effects: { clean: 25000, happiness: 8, addiction: 10 }, text: 'Gece senindi; kasayı kaldırdın.' }, { chance: 0.55, effects: { dirty: -15000, addiction: 15, stress: 10 }, text: 'Masa seni yedi; cebin boşaldı.' }]),
+          o('walk', 'Uzak dur', 'İradeyi güçlendirir', { happiness: -5, addiction: -20 }, null, 'Masaya sırtını döndün.'),
+        ] },
+      { id: 'pers.alcohol', category: 'personal', title: 'Alkol sorunu', weight: 5, cooldown: 3, requires: s => B(s).psyche.stress > 40,
+        prompt: () => 'Stres seni şişeye yaklaştırıyor.',
+        options: [
+          o('drink', 'Kafayı çek', 'Anlık rahatlama, bedeli var', { stress: -10, health: -8, addiction: 12 }, null, 'Bu gece unutmak istedin.'),
+          o('control', 'Kendini tut', 'Güvenli', { stress: 5, addiction: -10 }, null, 'Şişeyi geri koydun.'),
+        ] },
+      { id: 'pers.depression', category: 'personal', title: 'Karanlık çöktü', weight: 5, cooldown: 4, requires: s => B(s).attributes.happiness < 38,
+        prompt: () => 'İçine bir boşluk düştü; her şey anlamsız.',
+        options: [
+          o('therapy', 'Yardım al', 'İyileştirici', { clean: -4000, happiness: 15, stress: -15 }, null, 'Konuşmak iyi geldi.'),
+          o('bury', 'İçine göm', 'Riskli', { stress: 15, paranoia: 8 }, null, 'Duvarları ördün; yük büyüyor.'),
+          o('vice', 'Eğlenceye kaç', 'Geçici', { happiness: 6, addiction: 12, health: -6 }, null, 'Geçici bir kaçış buldun.'),
+        ] },
+      { id: 'pers.health_crisis', category: 'personal', title: 'Sağlık krizi', weight: 6, cooldown: 4, requires: s => B(s).age > 40 || B(s).attributes.health < 50,
+        prompt: () => 'Vücudun isyan etti; ciddi bir uyarı.',
+        options: [
+          o('treat', 'Tedavi ol', 'Pahalı ama güvenli', { clean: -15000, health: 25 }, null, 'En iyi bakımı aldın; toparladın.'),
+          o('ignore', 'Boş ver', 'Riskli', null, [{ chance: 0.5, effects: { health: -5 }, text: 'Şimdilik atlattın.' }, { chance: 0.5, effects: { health: -25, happiness: -10 }, text: 'Durum ağırlaştı.' }]),
+        ] },
+
+      /* 6 — Servet & Kariyer */
+      { id: 'wealth.company', category: 'wealth', title: 'Şirket kurma fırsatı', weight: 5, cooldown: 4, requires: s => P(s).cleanMoney > 40000,
+        prompt: () => 'Temiz bir cephe işletmesi kurma şansı var.',
+        options: [
+          o('found', 'Şirketi kur', 'Yeni aklama cephesi', { clean: -25000, grantBusiness: 'restaurant', reputation: 4 }, null, 'Yeni bir restoran cephen açıldı.'),
+          o('pass', 'Geç', 'Güvenli', null, null, 'Zamanı değil dedin.'),
+        ] },
+      { id: 'wealth.big_investment', category: 'wealth', title: 'Büyük yatırım', weight: 5, cooldown: 3, requires: s => P(s).cleanMoney > 50000,
+        prompt: () => 'Riskli ama büyük getirili bir yatırım masada.',
+        options: [
+          o('go', 'Bütün gücünle gir', 'Büyük kazanç potansiyeli, riskli', null, [{ chance: 0.5, effects: { clean: 60000 }, text: 'Yatırım patladı; servetin katlandı.' }, { chance: 0.5, effects: { clean: -30000 }, text: 'Balon söndü; ağır kayıp.' }]),
+          o('safe', 'Güvenli tahvil', 'Düşük ama kesin', { clean: 3000 }, null, 'Küçük ama garantili getiri.'),
+          o('no', 'Vazgeç', 'Güvenli', null, null, 'Riske girmedin.'),
+        ] },
+      { id: 'wealth.fraud', category: 'wealth', title: 'Dolandırıcılık teklifi', weight: 5, cooldown: 3, requires: s => true,
+        prompt: () => 'Karmaşık bir dolandırıcılık planına ortak aranıyor.',
+        options: [
+          o('join', 'Katıl', 'Büyük kazanç, federal risk', null, [{ chance: 0.5, effects: { clean: 40000 }, text: 'Vurgun tuttu; cebin doldu.' }, { chance: 0.5, effects: { clean: -15000, heat: 15, federalHeat: 10 }, text: 'Plan çöktü; federaller iz sürüyor.' }]),
+          o('report', 'İhbar et', 'İtibar bedeli', { reputation: -10, heat: -5, conscience: 10 }, null, 'Planı ele verdin; vicdanın rahat.'),
+          o('refuse', 'Reddet', 'Güvenli', null, null, 'Bulaşmadın.'),
+        ] },
+
+      /* 7 — Hanedan & Miras (AHTAPOT'u ayıran katman) */
+      { id: 'dyn.son_joins', category: 'dynasty', title: 'Oğlun aile işine girmek istiyor', weight: 7, cooldown: 3, legacyWeight: 4, requires: s => adultKids(s).length > 0,
+        resolveCtx: s => { const c = adultKids(s)[0]; return { targetId: c.id, target: c.name }; },
+        prompt: ctx => esc2(ctx.target) + ' "işin içinde olmak istiyorum" diyor.',
+        options: [
+          o('bring', 'İçeri al', 'Hanedanı büyütür', { childLoyalty: 10, familyRel: 10, reputation: 4 }, null, ctx => esc2(ctx.target) + ' artık ailenin bir parçası.'),
+          o('keep', 'Uzak tut', 'Güvenli ama soğuk', { familyRel: -12, happiness: 4 }, null, 'Onu bu hayattan uzak tuttun.'),
+          o('test', 'Önce sına', 'Belirsiz', null, [{ chance: 0.5, effects: { familyRel: 8, childLoyalty: 6 }, text: 'Sınavı geçti; gurur duydun.' }, { chance: 0.5, effects: { familyRel: -10 }, text: 'Hazır değilmiş; gücendi.' }]),
+        ] },
+      { id: 'dyn.daughter_university', category: 'dynasty', title: 'Kızın üniversite okumak istiyor', weight: 6, cooldown: 3, legacyWeight: 3, requires: s => kids(s).some(c => c.age >= 14),
+        resolveCtx: s => { const c = kids(s).find(k => k.age >= 14); return { targetId: c.id, target: c.name }; },
+        prompt: ctx => esc2(ctx.target) + ' bu hayattan çıkıp okumak istiyor.',
+        options: [
+          o('fund', 'Destekle', 'Ailen hoş karşılar', { clean: -10000, childIntel: 10, familyRel: 12 }, null, esc2_('Eğitimini finanse ettin; geleceğe yatırım.')),
+          o('refuse', 'İzin verme', 'İlişkiyi yıpratır', { familyRel: -15 }, null, 'Reddettin; arada buz tuttu.'),
+          o('business', 'İşi öğret', 'Hanedan odaklı', { childLoyalty: 8, familyRel: -5 }, null, 'Okul yerine sokağı seçtin onun için.'),
+        ] },
+      { id: 'dyn.heir_fight', category: 'dynasty', title: 'Veliaht kardeşiyle kavga etti', weight: 6, cooldown: 4, legacyWeight: 4, requires: s => adultKids(s).length >= 2,
+        resolveCtx: s => { const k = adultKids(s); return { targetId: k[0].id, target: k[0].name, otherId: k[1].id, other: k[1].name }; },
+        prompt: ctx => esc2(ctx.target) + ' ile ' + esc2(ctx.other) + ' taht için birbirine girdi.',
+        options: [
+          o('pick', 'Birini veliaht seç', 'Net ama bölücü', { setHeir: true, familyRel: 10, flag: { k: 'heirRivalry', v: 1 } }, null, ctx => esc2(ctx.target) + ' veliaht ilan edildi; diğeri küstü.'),
+          o('mediate', 'Arabuluculuk yap', 'Belirsiz', null, [{ chance: 0.5, effects: { familyRel: 6 }, text: 'Barıştırdın; aile bütün kaldı.' }, { chance: 0.5, effects: { familyRel: -8, paranoia: 6 }, text: 'Arabuluculuk tutmadı; çatlak büyüdü.' }]),
+          o('settle', 'Kendileri çözsün', 'Soğukkanlı', { conscience: -5 }, null, 'Karışmadın; güçlü olan kazansın dedin.'),
+        ] },
+      { id: 'dyn.inheritance', category: 'dynasty', title: 'Aile içinde miras tartışması', weight: 5, cooldown: 5, legacyWeight: 5, requires: s => s.dynasty.generation >= 1 && activeNonBoss(s, P(s)).length > 2,
+        prompt: () => 'Yokluğunda ne olacağı konusunda aile çatırdıyor.',
+        options: [
+          o('will', 'Net vasiyet yaz', 'Birliği korur', { reputation: 5, crewLoyalty: 5 }, null, 'Vasiyet açık; herkes yerini biliyor.'),
+          o('silent', 'Sustur, belirsiz bırak', 'Riskli', { paranoia: 8, crewLoyalty: -8 }, null, 'Kimseye söz vermedin; tedirginlik arttı.'),
+          o('loyalists', 'Sadıkları kayır', 'Bölücü ama bağ kurar', { crewLoyalty: 10, reputation: -4 }, null, 'Sadık adamları ödüllendirdin.'),
+        ] },
+      { id: 'dyn.child_snitch', category: 'dynasty', title: 'Çocuklarından biri muhbir olabilir', weight: 5, cooldown: 4, legacyWeight: 3, requires: s => adultKids(s).length > 0,
+        resolveCtx: s => { const c = adultKids(s)[0]; return { targetId: c.id, target: c.name }; },
+        prompt: ctx => 'Söylentiye göre ' + esc2(ctx.target) + ' yanlış kulaklara fısıldıyor.',
+        options: [
+          o('watch', 'Yakın takibe al', 'Güveni zedeler', { paranoia: 10, familyRel: -8 }, null, 'Kendi kanını izlemek ağır geldi.'),
+          o('trust', 'Güven, kanından şüphe etme', 'Riskli', null, [{ chance: 0.3, effects: { triggerRaid: true, familyRel: -20 }, text: 'Şüphe doğruymuş; ihbar geldi.' }, { chance: 0.7, effects: { familyRel: 12 }, text: 'Dedikoduymuş; güvenin karşılık buldu.' }]),
+          o('buy', 'Sadakatini satın al', 'Pahalı ama bağlayıcı', { clean: -8000, childLoyalty: 15, familyRel: 6 }, null, 'Geleceğini güvence altına aldın.'),
+        ] },
+    ];
+  }
+  // basit HTML/template kaçışları (prompt metinleri düz metin; UI ayrıca esc eder)
+  function esc2(s) { return String(s == null ? '' : s); }
+  function esc2_(s) { return s; }
+  data.lifeEvents = buildLifeEvents();
+
   const crewSystem = new CrewSystem();
   const moleSystem = new MoleSystem();
   const diplomacySystem = new DiplomacySystem();
@@ -2019,6 +2367,7 @@
   const prisonSystem = new PrisonSystem();
   const dynastySystem = new DynastySystem();
   const achievementSystem = new AchievementSystem();
+  const lifeEventSystem = new LifeEventSystem();
   // Living World tick'ine kaydet (saf fonksiyon imzasıyla)
   systems.crew = (state, rng) => crewSystem.update(state, rng);
   systems.mole = (state, rng) => moleSystem.update(state, rng);
@@ -2057,6 +2406,7 @@
     haveChild: (state) => withRng(state, rng => doHaveChild(state, rng)),
     setHeir: (state, charId) => doSetHeir(state, charId),
     fleeCountry: (state, havenName) => withRng(state, rng => doFleeCountry(state, rng, havenName)),
+    resolveEvent: (state, optionId) => withRng(state, rng => doResolveEvent(state, rng, optionId)),
   };
 
   /* ----------------------------------------------------------------------
@@ -2087,6 +2437,8 @@
     // yaşlılıktan ölen patron için succession'ı aynı yıl işle
     systems.dynasty(state, rng);
     systems.achievement(state, rng);
+    // yeni yılın yaşam olaylarını kuyruğa al (yaşa bağlı yoğunluk)
+    lifeEventSystem.populate(state, rng);
     // zirve servet kaydı (dynasty chronicle için)
     const pf = playerFamily(state);
     if (pf) { const ch = state.dynasty.history[state.dynasty.history.length - 1]; if (ch) ch.peakWealth = Math.max(ch.peakWealth || 0, totalMoney(pf)); }
@@ -2205,6 +2557,13 @@
         if (!c.childrenIds) c.childrenIds = [];
         if (!c.parentIds) c.parentIds = [];
       });
+      return s;
+    },
+    // v6 → v7: Life Event Engine kuyruğu + geçmişi + Legacy Memories
+    7: s => {
+      if (!s.eventQueue) s.eventQueue = [];
+      if (!s.eventState) s.eventState = { fired: {}, counts: {} };
+      if (!s.legacy) s.legacy = { memories: [], firsts: {} };
       return s;
     },
   };
@@ -2352,12 +2711,13 @@
     const v1env = JSON.stringify({ version: 1, checksum: '', state: '' });
     const v1state = { meta: { version: 1, seed: 1, createdAt: 0, saveName: 'x', nextId: 5 }, clock: { tick: 3, day: 10, year: 1 }, families: { f1: { id: 'f1', isPlayer: true, cleanMoney: 1, dirtyMoney: 0, reputation: 5, heat: 0, memberIds: ['c1'], territoryIds: [], businessIds: [], relations: {} } }, characters: { c1: { id: 'c1', familyId: 'f1', name: 'X', role: 'BOSS', stats: { combat: 40, cunning: 40, charisma: 40, loyalty: 40, management: 40 }, age: 30, health: 90, status: 'active', relations: {} } }, territories: {}, operations: {}, businesses: {}, market: { goods: {}, trends: {} }, world: { newsFeed: [] }, dynasty: { bossId: 'c1', history: [] }, eventLog: [], flags: {} };
     const migrated = persist.runMigrations(JSON.parse(JSON.stringify(v1state)));
-    check('Migration v1→v6 alanları doldurur', migrated.meta.version === 6 && migrated.clock.month === 1 &&
+    check('Migration v1→v7 alanları doldurur', migrated.meta.version === 7 && migrated.clock.month === 1 &&
       !!migrated.characters.c1.vitals && !!migrated.families.f1.school &&
       migrated.families.f1.armedMen != null && migrated.characters.c1.job === 'none' && !!migrated.families.f1.relations &&
       !!migrated.families.f1.inventory && !!migrated.families.f1.corruption && !!migrated.market.goods.weapon &&
       migrated.families.f1.federalHeat != null && migrated.characters.c1.isArrested != null && migrated.characters.c1.prison === null &&
-      !!migrated.achievements && !!migrated.stats && migrated.families.f1.inExile === false && Array.isArray(migrated.characters.c1.childrenIds));
+      !!migrated.achievements && !!migrated.stats && migrated.families.f1.inExile === false && Array.isArray(migrated.characters.c1.childrenIds) &&
+      Array.isArray(migrated.eventQueue) && !!migrated.eventState && !!migrated.legacy);
 
     // 15) 6 isimli rakip aile sabit kadro
     const s15 = createNewGame(1, { now: 1 });
@@ -2569,7 +2929,66 @@
     // 49) Save/Load round-trip yeni alanlarla bozulmaz
     const sv = createNewGame(2727, { now: 37 }); commands.marry(sv); commands.haveChild(sv); run(sv, 12);
     persist.save('v6', sv, MemoryAdapter); const lo = persist.load('v6', MemoryAdapter);
-    check('v6 save/load round-trip', JSON.stringify(sv) === JSON.stringify(lo));
+    check('save/load round-trip (v7)', JSON.stringify(sv) === JSON.stringify(lo));
+
+    // ===== LIFE EVENT ENGINE =====
+    // 50) Yaşa bağlı cadence: genç dönem daha yoğun
+    const cy = util.makeRng(11); let youngSum = 0, oldSum = 0;
+    for (let i = 0; i < 200; i++) { youngSum += eventCountForAge(20, cy); oldSum += eventCountForAge(60, cy); }
+    check('Genç dönem (13-25) yaşlıdan yoğun', youngSum > oldSum && eventCountForAge(8, util.makeRng(1)) <= 1);
+
+    // 51) advanceYear yaşam olayı kuyruğa atar (genç yaşta yoğun)
+    const le = createNewGame(3030, { now: 40 });
+    applyStartChoice(le, 'rob'); le.characters[le.dynasty.bossId].age = 20;
+    engine.advanceYear(le);
+    check('advanceYear olay kuyruğu doldurur', le.eventQueue.length >= 1);
+
+    // 52) resolveEvent etkileri uygular ve kuyruğu kaydırır
+    const re = createNewGame(3131, { now: 41 }); applyStartChoice(re, 'rob');
+    // elle bir olay enjekte et (deterministik kontrol)
+    re.eventQueue.unshift({ defId: 'street.informant', year: re.clock.year, ctx: {} });
+    const pf51 = playerFamily(re); const heat0 = pf51.heat; pf51.dirtyMoney = 20000;
+    const rr = commands.resolveEvent(re, 'silence');   // heat +12, dirty -3000, conscience -10, reputation +6
+    check('resolveEvent kuyruğu kaydırır', rr.ok && re.eventQueue.length === 0);
+    check('resolveEvent etkiyi uygular (heat↑)', playerFamily(re).heat > heat0);
+
+    // 53) applyEffects gerçek alanları değiştirir
+    const ae = createNewGame(3232, { now: 42 }); const pae = playerFamily(ae); const bae = ae.characters[ae.dynasty.bossId];
+    const rep0 = pae.reputation, hap0 = bae.attributes.happiness;
+    applyEffects(ae, util.makeRng(1), { reputation: 10, happiness: 8, clean: 5000 }, {});
+    check('applyEffects stat değiştirir', pae.reputation === util.clamp(rep0 + 10, 0, 100) && bae.attributes.happiness > hap0);
+
+    // 54) outcome rulosu deterministik
+    const oa = createNewGame(3333, { now: 43 }); applyStartChoice(oa, 'rob');
+    const ob = createNewGame(3333, { now: 43 }); applyStartChoice(ob, 'rob');
+    oa.eventQueue.unshift({ defId: 'pers.gambling', year: 1, ctx: {} });
+    ob.eventQueue.unshift({ defId: 'pers.gambling', year: 1, ctx: {} });
+    commands.resolveEvent(oa, 'play'); commands.resolveEvent(ob, 'play');
+    check('Olasılıksal sonuç deterministik', JSON.stringify(oa) === JSON.stringify(ob));
+
+    // 55) cooldown: aynı olay cooldown içinde tekrar tetiklenmez
+    const cd = createNewGame(3434, { now: 44 });
+    cd.eventState.fired['street.informant'] = cd.clock.year;
+    const def = data.lifeEvents.find(e => e.id === 'street.informant');
+    const elig = (cd.clock.year - cd.eventState.fired['street.informant']) >= def.cooldown;
+    check('Cooldown mantığı çalışır', elig === false && def.cooldown > 0);
+
+    // 56) Legacy Memory + dynastyScore katkısı
+    const lm = createNewGame(3535, { now: 45 });
+    const sc0 = dynastyScore(lm);
+    commands.marry(lm);   // first_marriage memory (weight 5)
+    check('İlk evlilik hafızaya kaydolur', !!lm.legacy.firsts.first_marriage && lm.legacy.memories.length >= 1);
+    check('Legacy ağırlığı skoru artırır', dynastyScore(lm) >= sc0);
+
+    // 57) 7 kategori + 100? hayır: olay kataloğu ve kategoriler mevcut
+    const cats = new Set(data.lifeEvents.map(e => e.category));
+    check('7 yaşam olayı kategorisi mevcut', cats.size === 7 && cats.has('dynasty') && data.lifeEvents.length >= 24);
+
+    // 58) LEE ile tam tur determinizm (advanceYear x4)
+    const lee1 = createNewGame(3636, { now: 46 }), lee2 = createNewGame(3636, { now: 46 });
+    applyStartChoice(lee1, 'gang'); applyStartChoice(lee2, 'gang');
+    for (let i = 0; i < 4; i++) { engine.advanceYear(lee1); engine.advanceYear(lee2); }
+    check('LEE determinizmi (4 yıl)', JSON.stringify(lee1) === JSON.stringify(lee2));
 
     const passed = results.filter(r => r.ok).length;
     const total = results.length;
@@ -2583,14 +3002,14 @@
    * Public API
    * -------------------------------------------------------------------- */
   root.AHTAPOT = {
-    version: '0.7-dynasty-succession-escape-achievements',
+    version: '0.8-life-event-engine',
     util, rules, data, model,
     state: {
       createNewGame, applyStartChoice, CURRENT_VERSION, playerFamily,
-      helpers: { familyMembers, busyCrew, totalMoney, schoolMod, rankFor, rankName, crewAttrs, crewLimit, jobName, familyPower, avgLoyalty, relationOf, alliesOf, isEmbargoed, corruptionLevel, cityFactor, catFactor, isInPrison, playerArrestedBoss, dynastyScore, findHeir },
+      helpers: { familyMembers, busyCrew, totalMoney, schoolMod, rankFor, rankName, crewAttrs, crewLimit, jobName, familyPower, avgLoyalty, relationOf, alliesOf, isEmbargoed, corruptionLevel, cityFactor, catFactor, isInPrison, playerArrestedBoss, dynastyScore, findHeir, legacyTotal, eventCountForAge },
     },
     story, systems, engine, persist, events, commands,
-    crewSystem, moleSystem, diplomacySystem, agencySystem, prisonSystem, dynastySystem, achievementSystem,
+    crewSystem, moleSystem, diplomacySystem, agencySystem, prisonSystem, dynastySystem, achievementSystem, lifeEventSystem,
     test: { selfTest },
   };
 })();
@@ -2913,8 +3332,8 @@
     }).join('');
   }
   function renderAdvance() {
-    const label = A.engine.isInPrison(G) ? '⏭️ AY GEÇİR (+1 Yıl)' : '⏭️ YAŞ AL (+1 YIL)';
-    $('advancebar').innerHTML = btn(label, 'advanceYear', '', '', 'primary');
+    const label = hasDecision() ? '📜 KARARINI VER' : (A.engine.isInPrison(G) ? '⏭️ AY GEÇİR (+1 Yıl)' : '⏭️ YAŞ AL (+1 YIL)');
+    $('advancebar').innerHTML = btn(label, 'advanceYear', '', '', hasDecision() ? 'gold' : 'primary');
   }
   function render() {
     if (!G) return;
@@ -2930,11 +3349,34 @@
     victoryShown = false; view = 'character'; closeModal(); persist();
     if (G.pendingEvent) showStart(); render();
   }
-  function showStart() {
-    const ev = G.pendingEvent; if (!ev) return;
-    openModal('<h2>Başlangıç</h2><p>' + esc(ev.prompt) + '</p>' +
-      ev.options.map(o => '<div class="opt">' + btn(esc(o.label), 'startChoice', o.id, '', 'primary') + '<div class="d">' + esc(o.desc) + '</div></div>').join(''), true);
+  // Kategori rozetleri (yaşam olayları)
+  const CAT = {
+    family: { label: 'AİLE', color: '#ff7a90' }, relationship: { label: 'İLİŞKİ', color: '#ff5fa2' },
+    street: { label: 'SOKAK', color: '#ff0033' }, state: { label: 'DEVLET', color: '#5fa8ff' },
+    personal: { label: 'KİŞİSEL', color: '#c08bff' }, wealth: { label: 'SERVET', color: '#00ff66' },
+    dynasty: { label: 'HANEDAN', color: '#d4af37' },
+  };
+  function hasDecision() { return !!(G && (G.pendingEvent || (G.eventQueue && G.eventQueue.length))); }
+  function maybeShowDecision() { if (hasDecision()) showDecision(); else if (!G.flags.gameOver) closeModal(); }
+  function showDecision() {
+    // 1) başlangıç senaryosu (özel)
+    if (G.pendingEvent) {
+      const ev = G.pendingEvent;
+      openModal('<div class="evbadge" style="color:var(--gold)">BAŞLANGIÇ</div><h2>Hayata Başlarken</h2><p>' + esc(ev.prompt) + '</p>' +
+        ev.options.map(o => '<div class="opt">' + btn(esc(o.label), 'startChoice', o.id, '', 'primary') + '<div class="d">' + esc(o.desc) + '</div></div>').join(''), true);
+      return;
+    }
+    // 2) yaşam olayı kuyruğu
+    const inst = G.eventQueue[0]; if (!inst) { closeModal(); return; }
+    const def = A.data.lifeEvents.find(e => e.id === inst.defId);
+    if (!def) { G.eventQueue.shift(); maybeShowDecision(); return; }
+    const cat = CAT[def.category] || { label: def.category.toUpperCase(), color: 'var(--muted)' };
+    const prompt = (typeof def.prompt === 'function') ? def.prompt(inst.ctx || {}) : (def.prompt || def.title);
+    openModal('<div class="evbadge" style="color:' + cat.color + ';border-color:' + cat.color + '">' + cat.label + (G.eventQueue.length > 1 ? ' · +' + (G.eventQueue.length - 1) : '') + '</div>' +
+      '<h2>' + esc(def.title) + '</h2><p>' + esc(prompt) + '</p>' +
+      def.options.map(o => '<div class="opt">' + btn(esc(o.label), 'resolveEvent', o.id, '', 'primary') + (o.hint ? '<div class="d">' + esc(o.hint) + '</div>' : '') + '</div>').join(''), true);
   }
+  function showStart() { showDecision(); }
   function showGameOver() {
     openModal('<h2>Hanedan Çöktü</h2><p>Geriye varis kalmadı. Bir imparatorluk tarihe karıştı. Hanedan Skoru: <b>' + H.dynastyScore(G) + '</b></p>' + btn('Yeni Hanedan Kur', 'newGame', '', '', 'primary'), true);
   }
@@ -2947,6 +3389,7 @@
     render();
     if (G.flags.gameOver) showGameOver();
     else if (G.flags.victory && !victoryShown) { victoryShown = true; showVictory(); }
+    else if (hasDecision()) showDecision();      // bekleyen kararı modal olarak göster
   }
 
   /* ---------- eylem yönlendirme ---------- */
@@ -2965,8 +3408,12 @@
       case 'setView': { view = id; render(); const ve = $('view'); ve.classList.remove('swap'); void ve.offsetWidth; ve.classList.add('swap'); return; }
       case 'closeModal': closeModal(); return;
       case 'newGame': newGame(); return;
-      case 'startChoice': A.state.applyStartChoice(G, id); closeModal(); afterChange(); return;
-      case 'advanceYear': { A.engine.advanceYear(G); toast('Bir yıl geçti', 'gold'); afterChange(); return; }
+      case 'startChoice': A.state.applyStartChoice(G, id); afterChange(); return;
+      case 'resolveEvent': { const r = A.commands.resolveEvent(G, id); if (r && r.text) toast(r.text, 'gold'); afterChange(); return; }
+      case 'advanceYear': {
+        if (hasDecision()) { showDecision(); return; }     // önce bekleyen kararları ver
+        A.engine.advanceYear(G); toast('Bir yıl geçti', 'gold'); afterChange(); return;
+      }
       case 'save': persist(); toast('Kaydedildi', 'ok'); return;
       case 'load': { const l = A.persist.load('auto'); if (l) { G = l; toast('Yüklendi', 'ok'); afterChange(); } else toast('Kayıt yok', 'bad'); return; }
       case 'export': { const s = A.persist.exportSave(G); openModal('<h2>Dışa Aktar</h2><p>Bu metni yedekle:</p><textarea class="input" style="height:140px">' + esc(s) + '</textarea>' + btn('Kapat', 'closeModal', '', '', '')); return; }
@@ -3017,8 +3464,8 @@
     if (!G) { G = A.state.createNewGame((Date.now() >>> 0) ^ Math.floor(Math.random() * 1e9)); }
     render();
     setTimeout(() => { $('splash').classList.add('hide'); }, 850);
-    if (G.pendingEvent) setTimeout(showStart, 700);
-    window.AHTAPOT.ui = { render, dispatch, get game() { return G; } };
+    if (hasDecision()) setTimeout(showDecision, 700);
+    window.AHTAPOT.ui = { render, dispatch, showDecision, get game() { return G; } };
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
