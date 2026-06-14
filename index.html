@@ -162,7 +162,20 @@
     #splash .tag { font-size:11px; color:var(--gold); letter-spacing:3px; text-transform:uppercase; }
     .input { width:100%; min-height:42px; background:#160c0c; border:1px solid var(--line2); border-radius:10px;
       color:var(--fg); padding:8px 10px; font-family:inherit; font-size:13px; }
-    select.input { appearance:none; }
+    select.input { appearance:none; -webkit-appearance:none; background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%); background-position:calc(100% - 14px) 18px,calc(100% - 9px) 18px; background-size:5px 5px,5px 5px; background-repeat:no-repeat; }
+
+    /* ---------- Cila: geçiş & animasyonlar ---------- */
+    @keyframes fadeIn { from{opacity:0} to{opacity:1} }
+    @keyframes popIn { from{opacity:0; transform:translateY(14px) scale(.96)} to{opacity:1; transform:translateY(0) scale(1)} }
+    @keyframes viewSwap { from{opacity:0; transform:translateX(14px)} to{opacity:1; transform:translateX(0)} }
+    #overlay.on { animation:fadeIn .18s ease; }
+    #overlay.on .modal { animation:popIn .26s cubic-bezier(.2,.9,.3,1.2); }
+    #view.swap { animation:viewSwap .24s ease; }
+    .navbtn:active { transform:scale(.92); }
+    /* mobil dokunma akıcılığı */
+    button, a, .navbtn { touch-action:manipulation; }
+    #view, #nav { -webkit-overflow-scrolling:touch; }
+    @media (prefers-reduced-motion:reduce){ *{animation:none !important; transition:none !important;} }
   </style>
 </head>
 <body>
@@ -238,9 +251,9 @@
    * -------------------------------------------------------------------- */
   const rules = {
     version: 1,
-    start: { clean: 5000, dirty: 0 },
-    salary: { BOSS: 0, UNDERBOSS: 500, CAPO: 300, SOLDIER: 150, ASSOCIATE: 80 },
-    launderCut: 0.15,
+    start: { clean: 6000, dirty: 0 },     // [balans] biraz daha yumuşak açılış
+    salary: { BOSS: 0, UNDERBOSS: 450, CAPO: 280, SOLDIER: 140, ASSOCIATE: 75 },
+    launderCut: 0.12,                     // [balans] aklama daha akıcı
     heatDecayPerTick: 0.4,
     raidHeatThreshold: 65,
     raidChancePerTick: 0.12,
@@ -267,14 +280,14 @@
     surveilCost: 800, loyaltyTestCost: 1200,  // oyuncu eylem maliyetleri
     // --- Diplomasi & savaş ---
     warBattleChancePerTick: 0.35, // savaştaki aileler arası tick başına çatışma şansı
-    warLuckSpread: 0.15,          // şans faktörü genişliği (deterministik rng)
+    warLuckSpread: 0.18,          // [balans] underdog sürprizleri biraz daha mümkün
     aiDiploChance: 0.08,          // AI'ın tick başına diplomatik hamle şansı
     embargoIncomePenalty: 0.25,   // ambargo altındaki ailenin ticaret/gelir cezası
     // --- Dinamik piyasa & kaçak ticaret ---
     marketReversion: 0.10,        // fiyatın hedefe geri dönüş hızı (mean-reversion)
     tradeBustHeatThreshold: 0.0,  // ticaret bust'ı her zaman olası
     tradeBustHeat: 10,            // ticaret yakalanırsa eklenen ısı
-    accountantLaunderBoost: 0.20, // Muhasebeci başına aklama kapasitesi artışı
+    accountantLaunderBoost: 0.25, // Muhasebeci başına aklama kapasitesi artışı
     auditFineRate: 0.10,          // denetimde temiz paranın kesilen oranı
     auditPolicePressureBase: 0.5, // denetim riskinde polis baskısı taban katsayısı
     // --- Siyasi yozlaşma ---
@@ -285,10 +298,10 @@
     courtReleaseDivisor: 250,     // yozlaşmayla hapisten salınma şansı böleni
     // --- İstihbarat kurumları (federal) ---
     federalCorruptionTrigger: 50, // bu üstü yozlaşma federal dikkat çeker
-    federalSmuggleDivisor: 60,    // kaçakçılık hacminin federal ısıya katkı böleni
-    federalHeatDecay: 1.5,        // tick başına federal ısı sönümü
-    federalWiretapThreshold: 40,  // telefon dinleme eşiği
-    federalRaidThreshold: 60,     // şafak operasyonu / varlık dondurma eşiği
+    federalSmuggleDivisor: 80,    // [balans] makul kaçakçılık feds tetiklemesin
+    federalHeatDecay: 1.8,        // [balans] federal ısı daha çabuk soğur
+    federalWiretapThreshold: 42,  // telefon dinleme eşiği
+    federalRaidThreshold: 65,     // [balans] şafak operasyonu / varlık dondurma eşiği
     federalBossArrestThreshold: 80, // bu üstünde patron bizzat tutuklanır
     federalFreezeRate: 0.25,      // dondurulan temiz banka oranı
     federalWiretapTicks: 6,       // dinleme süresi (ay)
@@ -340,11 +353,11 @@
     ],
     // Satın alınabilir siyasi/yargı/emniyet figürleri (rüşvet)
     officials: [
-      { id: 'mayor', name: 'Belediye Başkanı', cost: 50000, corruption: 15, upkeep: 3000 },
-      { id: 'prosecutor', name: 'Savcı', cost: 80000, corruption: 20, upkeep: 5000 },
-      { id: 'policeChief', name: 'Emniyet Müdürü', cost: 100000, corruption: 22, upkeep: 6000 },
-      { id: 'judge', name: 'Hakim', cost: 120000, corruption: 25, upkeep: 7000 },
-      { id: 'minister', name: 'Bakan', cost: 300000, corruption: 30, upkeep: 15000 },
+      { id: 'mayor', name: 'Belediye Başkanı', cost: 45000, corruption: 15, upkeep: 2500 },
+      { id: 'prosecutor', name: 'Savcı', cost: 75000, corruption: 20, upkeep: 4000 },
+      { id: 'policeChief', name: 'Emniyet Müdürü', cost: 95000, corruption: 22, upkeep: 5000 },
+      { id: 'judge', name: 'Hakim', cost: 115000, corruption: 25, upkeep: 6000 },
+      { id: 'minister', name: 'Bakan', cost: 280000, corruption: 30, upkeep: 12000 },
     ],
     // İstihbarat kurumları (federal) — yerel polisi bypass eder
     agencies: [
@@ -703,7 +716,7 @@
         dirtyMoney: isPlayer ? rules.start.dirty : rng.int(0, 3000),
         reputation: rng.int(10, 40),
         heat: 0,
-        armedMen: isPlayer ? 3 : rng.int(6, 18),          // Silahlı Adam Sayısı
+        armedMen: isPlayer ? 4 : rng.int(5, 14),          // [balans] erken savaşlar daha adil
         inventory: {},                                    // kaçak mal stoğu { goodId: adet }
         corruption: { mayor: false, prosecutor: false, policeChief: false, judge: false, minister: false },
         federalHeat: 0,                                   // Federal Takip Skoru (FBI/Interpol...)
@@ -1571,7 +1584,8 @@
     const fam = state.families[famId]; const g = data.goods.find(x => x.id === goodId); const m = state.market.goods[goodId];
     if (!fam || !g || !m) return { ok: false, reason: 'bad_good' };
     qty = Math.max(1, Math.floor(qty || 1)); city = city || fam.city;
-    const unit = Math.round(m.price * cityFactor(city, goodId) * (0.85 + m.supply * 0.15));
+    // [balans] alış fiyatı = mid + spread; bol arz ucuzlatır → kâr arbitraj/zamanlamadan gelir
+    const unit = Math.round(m.price * cityFactor(city, goodId) * (1.05 - (m.supply - 1) * 0.08));
     const cost = unit * qty;
     if (fam.dirtyMoney < cost) return { ok: false, reason: 'no_money', cost };
     fam.dirtyMoney -= cost;
@@ -1591,7 +1605,8 @@
     const have = fam.inventory[goodId] || 0;
     qty = Math.max(1, Math.min(Math.floor(qty || 1), have)); city = city || fam.city;
     if (have <= 0) return { ok: false, reason: 'no_stock' };
-    const unit = Math.round(m.price * cityFactor(city, goodId) * (1.05 + m.demand * 0.1) * schoolMod(fam, 'tradeMult', 1));
+    // [balans] satış fiyatı = mid - spread; yüksek talep + Triad bonusu kârı büyütür
+    const unit = Math.round(m.price * cityFactor(city, goodId) * (0.95 + (m.demand - 1) * 0.08) * schoolMod(fam, 'tradeMult', 1));
     const revenue = unit * qty;
     fam.inventory[goodId] = have - qty;
     fam.dirtyMoney += revenue;
@@ -2608,7 +2623,7 @@
   let toastT = null;
   function toast(msg, kind) {
     const t = $('toast'); t.textContent = msg; t.className = 'on ' + (kind || '');
-    clearTimeout(toastT); toastT = setTimeout(() => { t.className = ''; }, 2300);
+    clearTimeout(toastT); toastT = setTimeout(() => { t.className = ''; }, 2600);
   }
   function openModal(html, forced) { const m = $('modal'); m.innerHTML = html; m.dataset.forced = forced ? '1' : ''; $('overlay').classList.add('on'); }
   function closeModal() { $('overlay').classList.remove('on'); }
@@ -2947,7 +2962,7 @@
   function dispatch(act, id, arg) {
     if (!G && act !== 'newGame') return;
     switch (act) {
-      case 'setView': view = id; render(); return;
+      case 'setView': { view = id; render(); const ve = $('view'); ve.classList.remove('swap'); void ve.offsetWidth; ve.classList.add('swap'); return; }
       case 'closeModal': closeModal(); return;
       case 'newGame': newGame(); return;
       case 'startChoice': A.state.applyStartChoice(G, id); closeModal(); afterChange(); return;
