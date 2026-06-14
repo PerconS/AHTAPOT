@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <!-- Mobile-first + PWA: viewport, tema, iOS/Android tam ekran "ana ekrana ekle" -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
-  <meta name="theme-color" content="#0b0b0d" />
+  <meta name="theme-color" content="#0a0505" />
   <meta name="color-scheme" content="dark" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -12,59 +12,170 @@
   <meta name="apple-mobile-web-app-title" content="AHTAPOT" />
   <meta name="description" content="Suç Hanedanlığı ve Mafya Yaşam Simülasyonu" />
   <!-- Inline (data-URI) manifest: katı tek-dosya kuralını korur, ayrı dosya yok -->
-  <link rel="manifest" href='data:application/manifest+json,{"name":"AHTAPOT - Su%C3%A7 Hanedanl%C4%B1%C4%9F%C4%B1","short_name":"AHTAPOT","start_url":".","display":"standalone","orientation":"portrait","background_color":"%230b0b0d","theme_color":"%230b0b0d"}' />
+  <link rel="manifest" href='data:application/manifest+json,{"name":"AHTAPOT - Su%C3%A7 Hanedanl%C4%B1%C4%9F%C4%B1","short_name":"AHTAPOT","start_url":".","display":"standalone","orientation":"portrait","background_color":"%230a0505","theme_color":"%230a0505"}' />
   <title>AHTAPOT — Suç Hanedanlığı Simülasyonu</title>
   <style>
-    /* Faz 1: gerçek UI yok. Sadece mobile-first iskelet + çekirdek durum bilgisi. */
-    :root { --bg:#0b0b0d; --fg:#e7e3da; --muted:#8a8478; --accent:#b8893a; --line:#1d1d22; }
-    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-    html, body { margin:0; padding:0; background:var(--bg); color:var(--fg);
-      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
-    body { min-height:100dvh; padding: max(16px, env(safe-area-inset-top)) 16px 16px;
-      max-width: 720px; margin: 0 auto; }
-    h1 { font-size: 18px; letter-spacing: 2px; color: var(--accent); margin: 0 0 4px; }
-    .sub { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
-    .card { border:1px solid var(--line); border-radius:10px; padding:12px; margin-bottom:12px; }
-    .card h2 { font-size: 12px; color: var(--muted); text-transform: uppercase;
-      letter-spacing:1px; margin:0 0 8px; }
-    code { color: var(--accent); }
-    #status { font-size: 12px; line-height: 1.7; }
-    #news { font-size: 12px; line-height: 1.6; color: var(--fg); max-height: 40dvh; overflow:auto; }
-    #news div { padding: 4px 0; border-bottom: 1px dashed var(--line); }
-    .ok { color:#6fbf73; } .err { color:#d9534f; }
+    /* ===================================================================
+     * AHTAPOT — Faz 3 Mobil UI · Tema: Cyber Crimson / Mafia Noir
+     * =================================================================== */
+    :root {
+      --bg:#0a0505; --bg2:#120c0c; --panel:rgba(24,15,15,0.72); --panel2:rgba(34,20,20,0.6);
+      --line:#2c1b1b; --line2:#3a2424;
+      --red:#ff0033; --red-dim:#b3122e; --gold:#d4af37; --green:#00ff66;
+      --fg:#ece6e0; --muted:#9b8f88; --dim:#6d635d;
+      --shadow:0 8px 30px rgba(0,0,0,0.55);
+    }
+    * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+    html,body { margin:0; padding:0; height:100%; }
+    body {
+      background:
+        radial-gradient(1200px 600px at 50% -10%, #1a0c0c 0%, transparent 60%),
+        radial-gradient(800px 500px at 80% 110%, #160a12 0%, transparent 55%),
+        linear-gradient(180deg, var(--bg) 0%, #070303 100%);
+      color:var(--fg);
+      font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, sans-serif;
+      display:flex; justify-content:center; align-items:stretch;
+      min-height:100dvh; overscroll-behavior:none;
+    }
+    /* Telefon çerçevesi — masaüstünde ortalı, max 480px */
+    #app {
+      width:100%; max-width:480px; height:100dvh; display:flex; flex-direction:column;
+      background:linear-gradient(180deg,#0c0606,#080404); position:relative; overflow:hidden;
+      box-shadow:0 0 0 1px var(--line), var(--shadow);
+    }
+    @media (min-width:520px){ #app { height:calc(100dvh - 24px); margin:12px 0; border-radius:22px; } }
+
+    /* ---------- Üst Stat Paneli ---------- */
+    #topbar { flex:0 0 auto; padding:calc(8px + env(safe-area-inset-top)) 12px 8px; background:linear-gradient(180deg,rgba(20,10,10,0.95),rgba(14,7,7,0.85));
+      backdrop-filter:blur(8px); border-bottom:1px solid var(--line); z-index:5; }
+    .tb-row1 { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+    .tb-name { font-weight:700; font-size:14px; letter-spacing:.5px; flex:1; min-width:0;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .rank-chip { font-size:10px; font-weight:700; color:#1a1206; background:linear-gradient(180deg,#e8c75a,var(--gold));
+      padding:3px 8px; border-radius:20px; letter-spacing:.5px; box-shadow:0 0 10px rgba(212,175,55,.3); white-space:nowrap; }
+    .stat-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+    .stat { background:var(--panel2); border:1px solid var(--line); border-radius:9px; padding:5px 7px; }
+    .stat .l { font-size:8.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.6px; }
+    .stat .v { font-size:13px; font-weight:700; margin-top:1px; }
+    .v.clean { color:var(--green); } .v.dirty { color:var(--gold); }
+    .bar { height:4px; border-radius:3px; background:#241414; margin-top:4px; overflow:hidden; }
+    .bar > i { display:block; height:100%; border-radius:3px; }
+    .bar.heat > i { background:linear-gradient(90deg,#ff6a00,var(--red)); box-shadow:0 0 8px var(--red); }
+    .bar.para > i { background:linear-gradient(90deg,#7a3cff,#c026d3); }
+
+    /* ---------- Görünüm alanı ---------- */
+    #view { flex:1 1 auto; overflow-y:auto; overflow-x:hidden; padding:12px 12px 16px;
+      -webkit-overflow-scrolling:touch; }
+    .view-title { font-size:11px; color:var(--gold); text-transform:uppercase; letter-spacing:2px;
+      margin:2px 0 10px; font-weight:700; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:12px;
+      margin-bottom:10px; backdrop-filter:blur(6px); box-shadow:0 2px 12px rgba(0,0,0,.35); }
+    .card h3 { margin:0 0 9px; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:1px;
+      display:flex; justify-content:space-between; align-items:center; }
+    .row { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:5px 0; font-size:13px; }
+    .row + .row { border-top:1px solid rgba(255,255,255,.04); }
+    .muted { color:var(--muted); } .dim { color:var(--dim); font-size:11px; }
+    .red { color:var(--red); } .gold { color:var(--gold); } .green { color:var(--green); }
+    .pill { display:inline-block; font-size:10px; padding:2px 8px; border-radius:20px; background:var(--panel2);
+      border:1px solid var(--line2); color:var(--muted); }
+    .pill.war { color:var(--red); border-color:var(--red-dim); }
+    .pill.ally { color:var(--green); border-color:#0a6; }
+    .pill.peace { color:var(--muted); }
+
+    /* Butonlar — min 48px dokunmatik hedef */
+    button { font-family:inherit; cursor:pointer; }
+    .btn { display:inline-flex; align-items:center; justify-content:center; gap:6px;
+      min-height:42px; padding:10px 12px; border-radius:11px; border:1px solid var(--line2);
+      background:linear-gradient(180deg,#241414,#1a0d0d); color:var(--fg); font-size:12.5px; font-weight:600;
+      transition:transform .08s ease, box-shadow .15s ease, background .15s; width:100%; }
+    .btn:active { transform:scale(.97); }
+    .btn.primary { background:linear-gradient(180deg,#ff1a45,var(--red-dim)); border-color:var(--red);
+      color:#fff; box-shadow:0 0 16px rgba(255,0,51,.35); }
+    .btn.gold { background:linear-gradient(180deg,#e8c75a,var(--gold)); border-color:#f0d97a; color:#1a1206; }
+    .btn.ghost { background:transparent; }
+    .btn.sm { min-height:36px; padding:7px 10px; font-size:11.5px; width:auto; }
+    .btn:disabled { opacity:.4; filter:grayscale(.6); }
+    .btn-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .btn-grid.c3 { grid-template-columns:1fr 1fr 1fr; }
+    .actions { display:flex; gap:6px; flex-wrap:wrap; }
+
+    /* Sürgün/banner */
+    .banner { border-radius:11px; padding:9px 11px; font-size:11.5px; margin-bottom:10px; border:1px solid; }
+    .banner.danger { background:rgba(255,0,51,.08); border-color:var(--red-dim); color:#ff7a90; }
+    .banner.gold { background:rgba(212,175,55,.08); border-color:var(--gold); color:#ecd98a; }
+
+    /* Haber akışı */
+    .feed div { font-size:11.5px; padding:6px 0; border-bottom:1px dashed var(--line); color:var(--fg); line-height:1.45; }
+    .feed div:last-child { border-bottom:0; }
+
+    /* Başarım galerisi */
+    .ach-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .ach { border:1px solid var(--line); border-radius:11px; padding:9px; background:var(--panel2); }
+    .ach.on { border-color:var(--gold); background:linear-gradient(180deg,rgba(212,175,55,.12),rgba(212,175,55,.03)); box-shadow:0 0 12px rgba(212,175,55,.15); }
+    .ach .n { font-size:11px; font-weight:700; } .ach.on .n { color:var(--gold); }
+    .ach.off { opacity:.5; } .ach .c { font-size:8.5px; color:var(--dim); text-transform:uppercase; letter-spacing:.5px; }
+
+    /* Sticky aksiyon (Yaş Al) */
+    #advancebar { flex:0 0 auto; padding:8px 12px; background:linear-gradient(180deg,transparent,rgba(8,4,4,.9));
+      border-top:1px solid var(--line); }
+
+    /* Alt navigasyon (sabit, yatay kaydırmalı) */
+    #nav { flex:0 0 auto; display:flex; gap:2px; overflow-x:auto; scrollbar-width:none;
+      background:rgba(8,4,4,.96); border-top:1px solid var(--line); padding:4px 4px calc(4px + env(safe-area-inset-bottom));
+      backdrop-filter:blur(10px); scroll-snap-type:x proximity; }
+    #nav::-webkit-scrollbar { display:none; }
+    .navbtn { flex:0 0 auto; min-width:56px; min-height:50px; border:0; background:transparent; color:var(--muted);
+      display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; border-radius:10px;
+      padding:4px 6px; scroll-snap-align:center; transition:color .15s, background .15s; }
+    .navbtn .i { font-size:17px; line-height:1; }
+    .navbtn .t { font-size:8.5px; letter-spacing:.3px; }
+    .navbtn.active { color:var(--red); background:rgba(255,0,51,.08); }
+    .navbtn.active .i { filter:drop-shadow(0 0 6px var(--red)); }
+    .navbtn.alert { color:var(--gold); }
+    .navbtn.alert .i { filter:drop-shadow(0 0 6px var(--gold)); }
+
+    /* Modal & Toast (alert YOK) */
+    #overlay { position:absolute; inset:0; background:rgba(5,2,2,.78); backdrop-filter:blur(4px);
+      display:none; align-items:center; justify-content:center; padding:20px; z-index:50; }
+    #overlay.on { display:flex; }
+    .modal { width:100%; max-width:380px; background:linear-gradient(180deg,#1c1010,#140a0a); border:1px solid var(--line2);
+      border-radius:18px; padding:18px; box-shadow:var(--shadow); max-height:84dvh; overflow:auto; }
+    .modal h2 { margin:0 0 6px; font-size:15px; color:var(--red); letter-spacing:.5px; }
+    .modal p { font-size:13px; color:var(--fg); line-height:1.5; margin:0 0 14px; }
+    .modal .opt { margin-top:8px; }
+    .modal .opt .d { font-size:10.5px; color:var(--muted); margin-top:3px; }
+    #toast { position:absolute; left:50%; bottom:120px; transform:translateX(-50%) translateY(20px);
+      background:rgba(20,10,10,.96); border:1px solid var(--line2); color:var(--fg); font-size:12.5px;
+      padding:10px 16px; border-radius:12px; max-width:88%; text-align:center; opacity:0; pointer-events:none;
+      transition:opacity .25s, transform .25s; z-index:60; box-shadow:var(--shadow); }
+    #toast.on { opacity:1; transform:translateX(-50%) translateY(0); }
+    #toast.ok { border-color:#0a6; } #toast.bad { border-color:var(--red-dim); }
+    #toast.gold { border-color:var(--gold); color:var(--gold); }
+
+    /* Splash */
+    #splash { position:absolute; inset:0; z-index:80; display:flex; flex-direction:column;
+      align-items:center; justify-content:center; gap:14px; background:radial-gradient(circle at 50% 40%,#1a0a0a,#070303);
+      transition:opacity .6s; }
+    #splash.hide { opacity:0; pointer-events:none; }
+    #splash .logo { font-size:40px; font-weight:800; letter-spacing:6px; color:var(--red);
+      text-shadow:0 0 24px rgba(255,0,51,.6); }
+    #splash .tag { font-size:11px; color:var(--gold); letter-spacing:3px; text-transform:uppercase; }
+    .input { width:100%; min-height:42px; background:#160c0c; border:1px solid var(--line2); border-radius:10px;
+      color:var(--fg); padding:8px 10px; font-family:inherit; font-size:13px; }
+    select.input { appearance:none; }
   </style>
 </head>
 <body>
-  <h1>AHTAPOT</h1>
-  <div class="sub">Suç Hanedanlığı & Mafya Yaşam Simülasyonu — <b>Modül: Hanedan · Varis Genetiği · Succession · Kaçış · Başarımlar (UI yok)</b></div>
-
-  <div class="card">
-    <h2>Durum</h2>
-    <div id="status">Çekirdek yükleniyor…</div>
-  </div>
-
-  <div class="card">
-    <h2>Yaşayan Dünya — Haber Akışı</h2>
-    <div id="news"></div>
-  </div>
-
-  <div class="card">
-    <h2>Konsol API'si</h2>
-    <div class="sub" style="margin:0">
-      Bu faz UI içermez. Tarayıcı konsolundan dene:<br />
-      <code>AHTAPOT.test.selfTest()</code> — doğrulama testleri<br />
-      <code>const g = AHTAPOT.state.createNewGame(123)</code> — yeni oyun (14 yaş)<br />
-      <code>AHTAPOT.state.applyStartChoice(g, 'rob')</code> — başlangıç kararı (rob/police/gang)<br />
-      <code>AHTAPOT.engine.advanceYear(g)</code> — +1 yıl simüle et<br />
-      <code>AHTAPOT.commands.hire(g, {job:'lawyer'})</code> — ekibe avukat al<br />
-      <code>AHTAPOT.commands.declareWar(g, rivalId)</code> / <code>territoryWar</code> / <code>espionage</code> / <code>assassinate</code><br />
-      <code>AHTAPOT.commands.surveil(g, charId)</code> / <code>interrogate</code> / <code>loyaltyTest</code> / <code>silence</code> (köstebek)<br />
-      <code>AHTAPOT.commands.buyGood(g, 'art', 2)</code> / <code>sellGood</code> — kaçak ticaret (ucuza al, pahalıya sat)<br />
-      <code>AHTAPOT.commands.bribe(g, 'policeChief')</code> / <code>buyBusiness(g, 'casino')</code> — yozlaşma & aklama<br />
-      <code>AHTAPOT.engine.isInPrison(g)</code> · <code>prisonFight</code> / <code>prisonBribeGuard</code> / <code>prisonRecruit</code> / <code>prisonEscape(g,'tunnel')</code><br />
-      <code>AHTAPOT.commands.marry(g)</code> / <code>haveChild(g)</code> / <code>setHeir(g,charId)</code> / <code>fleeCountry(g,'Dubai')</code> — hanedan & kaçış<br />
-      <code>AHTAPOT.state.helpers.dynastyScore(g)</code> · başarımlar <code>g.achievements.unlocked</code><br />
-      <code>AHTAPOT.persist.save('slot1', g)</code> / <code>AHTAPOT.persist.load('slot1')</code>
+  <div id="app">
+    <div id="topbar"></div>
+    <div id="view"></div>
+    <div id="advancebar"></div>
+    <nav id="nav"></nav>
+    <div id="overlay"><div class="modal" id="modal"></div></div>
+    <div id="toast"></div>
+    <div id="splash">
+      <div class="logo">AHTAPOT</div>
+      <div class="tag">Suç Hanedanlığı Simülasyonu</div>
     </div>
   </div>
 
@@ -2470,53 +2581,431 @@
 })();
 </script>
 
-<script id="ahtapot-bootstrap">
-/* Faz 1 demo bağlama (UI değil): çekirdek yüklendiğini göster, mini haber akışı.
-   Gerçek render katmanı faz 3'te gelecek. */
+<script id="ahtapot-ui">
+/* =========================================================================
+ * AHTAPOT — Faz 3 Mobil UI (Cyber Crimson / Mafia Noir)
+ * Vanilla DOM render + view manager. Çekirdeğe yalnız public API/commands ile
+ * bağlanır; durumu okur, komut gönderir, her eylemde yeniden çizer.
+ * ========================================================================= */
 (function () {
-  if (typeof document === 'undefined' || !root_has('AHTAPOT')) return;
-  function root_has(k) { return typeof window !== 'undefined' && k in window; }
-  const A = window.AHTAPOT;
-  const statusEl = document.getElementById('status');
-  const newsEl = document.getElementById('news');
+  if (typeof document === 'undefined' || typeof window === 'undefined' || !window.AHTAPOT) return;
+  const A = window.AHTAPOT, H = A.state.helpers, D = A.data;
+  const $ = id => document.getElementById(id);
+  let G = null, view = 'character', victoryShown = false;
 
-  // Demo oyun başlat (deterministik seed), başlangıç kararını ver, ekip/diplomasi göster
-  const test = A.test.selfTest();
-  const g = A.state.createNewGame(Date.now() & 0xffff);
-  A.state.applyStartChoice(g, 'rob');         // demo: kanlı başlangıç yolu
-  A.commands.hire(g, { job: 'bodyguard' });   // demo: koruma al
-  A.commands.hire(g, { job: 'spy' });         // demo: casus al
-  const rivalId = Object.keys(g.families).find(id => !g.families[id].isPlayer);
-  A.commands.declareWar(g, rivalId);          // demo: bir rakibe savaş aç
-  A.commands.marry(g); A.commands.haveChild(g); // demo: hanedan kurulumu
-  for (let i = 0; i < 5; i++) A.engine.advanceYear(g);
+  /* ---------- biçimlendirme ---------- */
+  const money = n => { n = Math.round(n || 0); return (n < 0 ? '-' : '') + Math.abs(n).toLocaleString('tr-TR') + '₺'; };
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const bar = (v, cls) => '<div class="bar ' + cls + '"><i style="width:' + clamp(v, 0, 100) + '%"></i></div>';
+  const yearOf = tick => Math.max(1, Math.ceil((tick + 1) / 12));
+  const pf = () => A.state.playerFamily(G);
+  const boss = () => G.characters[G.dynasty.bossId];
+  const activeMembers = f => H.familyMembers(G, f).filter(c => c.status === 'active');
+  const rivals = () => Object.values(G.families).filter(f => !f.isPlayer);
 
-  const fam = A.state.playerFamily(g);
-  // demo: bir mal alıp satarak ticaret döngüsünü göster (kirli para gerektirir)
-  A.commands.buyGood(g, 'cryptotape', 3);
-  A.commands.sellGood(g, 'cryptotape', 3, A.data.citiesByCountry[fam.country][0]);
-  if (fam.cleanMoney >= 50000) A.commands.bribe(g, 'mayor');  // demo: yeterliyse rüşvet
+  /* ---------- toast & modal (alert YOK) ---------- */
+  let toastT = null;
+  function toast(msg, kind) {
+    const t = $('toast'); t.textContent = msg; t.className = 'on ' + (kind || '');
+    clearTimeout(toastT); toastT = setTimeout(() => { t.className = ''; }, 2300);
+  }
+  function openModal(html, forced) { const m = $('modal'); m.innerHTML = html; m.dataset.forced = forced ? '1' : ''; $('overlay').classList.add('on'); }
+  function closeModal() { $('overlay').classList.remove('on'); }
 
-  const boss = g.characters[g.dynasty.bossId];
-  const school = A.data.schools.find(s => s.id === fam.school).name;
-  const wars = Object.values(fam.relations).filter(r => r.treaty === 'war').length;
-  const allies = A.state.helpers.alliesOf(g, fam.id).length;
-  const corr = A.state.helpers.corruptionLevel(fam);
-  const econ = (g.market.trends.economy * 100).toFixed(0);
-  const cryptoP = g.market.goods.cryptotape.price;
-  statusEl.innerHTML =
-    'Self-test: <span class="' + (test.ok ? 'ok">' : 'err">') + test.passed + '/' + test.total + '</span> &nbsp;|&nbsp; ' +
-    'Çekirdek <code>v' + A.version + '</code> hazır.<br>' +
-    boss.name + ' · <code>' + boss.age + '</code> yaş · <code>' + fam.country + '/' + fam.city + '</code> · Ekol: <code>' + school + '</code><br>' +
-    'Rütbe: <code>' + A.state.helpers.rankName(fam.rank) + '</code> · Yıl <code>' + g.clock.year + '</code> · Ay <code>' + g.clock.month + '</code><br>' +
-    'Temiz <code>' + fam.cleanMoney + '₺</code> · Kirli <code>' + fam.dirtyMoney + '₺</code> · Isı <code>' + fam.heat.toFixed(0) + '</code> · Yozlaşma <code>' + corr + '</code> · Paranoya <code>' + boss.vitals.paranoia.toFixed(0) + '</code><br>' +
-    'Sağlık <code>' + boss.attributes.health.toFixed(0) + '</code> · Bölge <code>' + fam.territoryIds.length + '</code> · İşletme <code>' + fam.businessIds.length + '</code> · Üye <code>' + fam.memberIds.filter(id => g.characters[id] && g.characters[id].status === 'active').length + '</code><br>' +
-    'Silahlı adam <code>' + fam.armedMen + '</code> · Güç <code>' + A.state.helpers.familyPower(g, fam) + '</code> · Savaş <code>' + wars + '</code> · İttifak <code>' + allies + '</code><br>' +
-    'Federal ısı <code>' + (fam.federalHeat || 0).toFixed(0) + '</code> · Kırmızı bülten <code>' + (fam.redNotice ? 'EVET' : 'hayır') + '</code> · Hapiste <code>' + (A.engine.isInPrison(g) ? 'EVET' : 'hayır') + '</code><br>' +
-    'Nesil <code>' + g.dynasty.generation + '</code> · Çocuk <code>' + g.stats.children + '</code> · Hanedan Skoru <code>' + A.state.helpers.dynastyScore(g) + '</code> · Başarım <code>' + Object.keys(g.achievements.unlocked).length + '/' + A.data.achievements.length + '</code><br>' +
-    'Ekonomi endeksi <code>' + econ + '</code> · Kripto Kaset fiyatı <code>' + cryptoP + '₺</code> · Rakip <code>' + (Object.keys(g.families).length - 1) + '</code>';
+  /* ---------- üst stat paneli ---------- */
+  function renderTop() {
+    const f = pf(), b = boss();
+    $('topbar').innerHTML =
+      '<div class="tb-row1">' +
+        '<span class="tb-name">' + esc(b ? b.name : f.name) + '</span>' +
+        '<span class="rank-chip">' + esc(H.rankName(f.rank)) + '</span>' +
+      '</div>' +
+      '<div class="stat-grid">' +
+        statBox('Yaş', b ? b.age : '—') +
+        statBox('Yıl', G.clock.year) +
+        statBox('Nesil', G.dynasty.generation) +
+        statBox('Temiz Banka', money(f.cleanMoney), 'clean') +
+        statBox('Kirli Nakit', money(f.dirtyMoney), 'dirty') +
+        statBox('Sağlık', (b ? b.attributes.health.toFixed(0) : '—')) +
+        statBar('Heat', f.heat, 'heat') +
+        statBar('Paranoya', b ? b.vitals.paranoia : 0, 'para') +
+        statBox('Federal', (f.federalHeat || 0).toFixed(0), (f.federalHeat > 50 ? 'dirty' : '')) +
+      '</div>';
+  }
+  const statBox = (l, v, cls) => '<div class="stat"><div class="l">' + l + '</div><div class="v ' + (cls || '') + '">' + v + '</div></div>';
+  const statBar = (l, v, cls) => '<div class="stat"><div class="l">' + l + '</div><div class="v">' + Math.round(v) + '</div>' + bar(v, cls) + '</div>';
 
-  newsEl.innerHTML = g.world.newsFeed.slice(0, 22).map(n => '<div>[Y' + Math.ceil((n.tick + 1) / 12) + '] ' + n.text + '</div>').join('') || '<div>Henüz haber yok…</div>';
+  /* ---------- 12 görünüm ---------- */
+  const NAV = [
+    { id: 'character', icon: '🎭', label: 'Karakter' },
+    { id: 'empire', icon: '🏙️', label: 'İmparatorluk' },
+    { id: 'crew', icon: '👥', label: 'Ekip' },
+    { id: 'smuggling', icon: '📦', label: 'Kaçakçılık' },
+    { id: 'laundering', icon: '💰', label: 'Kara Para' },
+    { id: 'diplomacy', icon: '🤝', label: 'Diplomasi' },
+    { id: 'politics', icon: '⚖️', label: 'Siyaset' },
+    { id: 'intel', icon: '🛰️', label: 'İstihbarat' },
+    { id: 'prison', icon: '⛓️', label: 'Hapis' },
+    { id: 'dynasty', icon: '👑', label: 'Hanedan' },
+    { id: 'achievements', icon: '🏆', label: 'Başarım' },
+    { id: 'console', icon: '🖥️', label: 'Konsol' },
+  ];
+
+  const VIEWS = {
+    character() {
+      const f = pf(), b = boss(); const sc = D.schools.find(s => s.id === f.school);
+      const at = b.attributes, vi = b.vitals, ps = b.psyche;
+      return title('Karakter') +
+        card('Profil',
+          rowKV('İsim', esc(b.name)) + rowKV('Konum', esc(f.country + ' / ' + f.city)) +
+          rowKV('Suç Ekolü', '<span class="gold">' + esc(sc ? sc.name : '—') + '</span>') +
+          rowKV('Rütbe', '<span class="gold">' + esc(H.rankName(f.rank)) + '</span>') +
+          (b.spouseId ? rowKV('Eş', esc((G.characters[b.spouseId] || {}).name || '—')) : '') +
+          (b.traits.length ? rowKV('Özellik', esc(b.traits.join(', '))) : '')) +
+        card('Statlar',
+          statLine('Sağlık', at.health) + statLine('Mutluluk', at.happiness) +
+          statLine('Zekâ', at.intelligence) + statLine('Görünüş', at.looks) +
+          statLine('Saygınlık', f.reputation) + statLine('Enerji', vi.energy)) +
+        card('Psikoloji',
+          statLine('Paranoya', vi.paranoia, 'para') + statLine('Stres', ps.stress, 'para') +
+          statLine('Travma', ps.trauma, 'para') + statLine('Vicdan', ps.conscience) +
+          statLine('Bağımlılık', ps.addiction, 'para')) +
+        card('Yetenekler',
+          statLine('Dövüş', b.skills.combat) + statLine('Kurnazlık', b.skills.cunning) +
+          statLine('Karizma', b.skills.charisma) + statLine('Sadakat', b.skills.loyalty) +
+          statLine('Yönetim', b.skills.management) + statLine('Hacking', b.skills.hacking));
+    },
+
+    empire() {
+      const f = pf();
+      const owned = f.territoryIds.map(id => G.territories[id]).filter(Boolean);
+      const neutral = Object.values(G.territories).filter(t => !t.ownerId).length;
+      let h = title('İmparatorluk') +
+        card('Özet',
+          rowKV('Kontrol Edilen Bölge', '<span class="gold">' + owned.length + '</span>') +
+          rowKV('Silahlı Adam', f.armedMen) + rowKV('Aile Gücü', '<span class="red">' + H.familyPower(G, f) + '</span>') +
+          rowKV('Tarafsız Bölge', neutral) + rowKV('Hanedan Skoru', '<span class="gold">' + H.dynastyScore(G) + '</span>'));
+      h += '<div class="card"><h3>Bölgeler</h3>' + (owned.length ? owned.map(t =>
+        '<div class="row"><span>' + esc(t.name) + '</span><span class="dim">gelir ' + money(t.baseIncome) + ' · sav ' + Math.round(t.defense) + ' · ısı ' + Math.round(t.heat) + '</span></div>').join('') : '<div class="dim">Henüz bölge yok. Diplomasi → Toprak Savaşı ile ele geçir.</div>') + '</div>';
+      return h;
+    },
+
+    crew() {
+      const f = pf(); const mem = H.familyMembers(G, f);
+      const limit = H.crewLimit(f); const act = activeMembers(f).length;
+      let h = title('Ekip') +
+        card('İşe Alım <span class="dim">(' + act + '/' + limit + ')</span>',
+          '<select class="input" id="hireJob" style="margin-bottom:8px">' +
+          D.jobs.map(j => '<option value="' + j.id + '">' + esc(j.name) + '</option>').join('') + '</select>' +
+          btn('İşe Al', 'hire', '', '', 'primary'));
+      h += '<div class="card"><h3>Kadro</h3>';
+      mem.forEach(c => {
+        if (c.status === 'dead') return;
+        const tag = c.status === 'jailed' ? '<span class="pill war">hapis</span>' : c.status === 'child' ? '<span class="pill">çocuk</span>' : c.status === 'spouse' ? '<span class="pill">eş</span>' : '';
+        const susp = c.suspicion > 0 ? ' <span class="dim">şüphe ' + Math.round(c.suspicion) + '</span>' : '';
+        h += '<div style="padding:8px 0;border-top:1px solid rgba(255,255,255,.05)">' +
+          '<div class="row" style="padding:0"><span><b>' + esc(c.name) + '</b> ' + tag + '</span>' +
+            '<span class="dim">' + (c.role === 'BOSS' ? 'PATRON' : esc(H.jobName(c.job))) + '</span></div>' +
+          '<div class="dim" style="margin:3px 0">sadakat ' + Math.round(c.skills.loyalty) + ' · cesaret ' + c.courage + ' · açgözlülük ' + c.greed + ' · zekâ ' + c.attributes.intelligence + susp + '</div>';
+        if (c.role !== 'BOSS' && (c.status === 'active')) {
+          h += '<div class="actions">' +
+            btnSm('Takip', 'surveil', c.id) + btnSm('Sorgula', 'interrogate', c.id) +
+            btnSm('Sadakat T.', 'loyaltyTest', c.id) + btnSm('Sustur', 'silence', c.id, 'primary') +
+            '<select class="input" id="job_' + c.id + '" style="width:auto;min-height:36px;flex:1">' +
+              '<option value="none">Pozisyonsuz</option>' + D.jobs.map(j => '<option value="' + j.id + '"' + (c.job === j.id ? ' selected' : '') + '>' + esc(j.name) + '</option>').join('') + '</select>' +
+            btnSm('Ata', 'assignJob', c.id) + '</div>';
+        }
+        h += '</div>';
+      });
+      return h + '</div>';
+    },
+
+    smuggling() {
+      const f = pf();
+      const cities = []; Object.keys(D.citiesByCountry).forEach(co => D.citiesByCountry[co].forEach(ci => cities.push(ci)));
+      D.havens.forEach(hv => { if (!cities.includes(hv.name)) cities.push(hv.name); });
+      let h = title('Kaçakçılık') +
+        '<div class="card"><h3>Piyasa Kontrolü</h3>' +
+        '<div class="row"><span class="muted" style="font-size:11px">Şehir</span>' +
+        '<select class="input" id="tradeCity" style="width:auto;flex:1;margin-left:8px">' +
+        cities.map(c => '<option value="' + esc(c) + '"' + (c === f.city ? ' selected' : '') + '>' + esc(c) + '</option>').join('') + '</select></div>' +
+        '<div class="row"><span class="muted" style="font-size:11px">Adet</span>' +
+        '<select class="input" id="tradeQty" style="width:auto;flex:1;margin-left:8px"><option>1</option><option>5</option><option>10</option></select></div>' +
+        '<div class="dim" style="margin-top:6px">Kirli nakit ile al-sat. Şehirler arası fiyat farkı = arbitraj.</div></div>';
+      D.goods.forEach(gd => {
+        const m = G.market.goods[gd.id]; const have = f.inventory[gd.id] || 0;
+        const hp = Math.round(m.price * H.cityFactor(f.city, gd.id));
+        h += '<div class="card"><h3>' + esc(gd.name) + ' <span class="dim">stok ' + have + '</span></h3>' +
+          rowKV('Piyasa fiyatı', money(m.price)) + rowKV('Senin şehrinde', money(hp)) +
+          '<div class="btn-grid" style="margin-top:8px">' + btn('SATIN AL', 'buyGood', gd.id, '', '') + btn('SAT', 'sellGood', gd.id, '', 'gold') + '</div></div>';
+      });
+      return h;
+    },
+
+    laundering() {
+      const f = pf();
+      let h = title('Kara Para') +
+        card('Aklama Durumu',
+          rowKV('Kirli Nakit', '<span class="red">' + money(f.dirtyMoney) + '</span>') +
+          rowKV('Temiz Banka', '<span class="green">' + money(f.cleanMoney) + '</span>') +
+          rowKV('Muhasebeci', f.businessIds.length ? (activeMembers(f).filter(c => c.job === 'accountant').length + ' adet') : '—') +
+          rowKV('Aklama kesintisi', Math.round(A.rules.launderCut * 100) + '%'));
+      h += '<div class="card"><h3>İşletmeler (Cepheler)</h3>';
+      const owned = f.businessIds.map(id => G.businesses[id]).filter(Boolean);
+      h += owned.length ? owned.map(b => { const bt = D.businessTypes.find(t => t.id === b.type) || {};
+        return '<div class="row"><span>' + esc(bt.name || b.type) + '</span><span class="dim">gelir ' + money(b.income) + ' · aklama ' + money(b.launderCapacity) + ' · denetim ' + Math.round((b.auditRisk || 0) * 100) + '%</span></div>';
+      }).join('') : '<div class="dim">İşletme yok.</div>';
+      h += '</div><div class="card"><h3>İşletme Satın Al</h3>';
+      D.businessTypes.forEach(bt => {
+        h += '<div class="row"><span>' + esc(bt.name) + '<div class="dim">gelir ' + money(bt.income) + ' · aklama ' + money(bt.launder) + '</div></span>' +
+          btnSm(money(bt.cost), 'buyBusiness', bt.id, 'gold') + '</div>';
+      });
+      return h + '</div>';
+    },
+
+    diplomacy() {
+      const f = pf();
+      let h = title('Diplomasi');
+      rivals().forEach(r => {
+        const rel = H.relationOf(f, r.id); const tcls = rel.treaty === 'war' ? 'war' : rel.treaty === 'alliance' ? 'ally' : 'peace';
+        h += '<div class="card"><h3>' + esc(r.name) + ' <span class="pill ' + tcls + '">' + esc(rel.treaty) + '</span></h3>' +
+          '<div class="dim" style="margin-bottom:8px">ilişki ' + Math.round(rel.standing) + ' · güç ' + H.familyPower(G, r) + ' · servet ' + money(H.totalMoney(r)) + ' · silahlı ' + r.armedMen + (G.flags['intel_' + r.id] ? '' : ' <span class="red">?</span>') + '</div>' +
+          '<div class="actions">' +
+            btnSm('Yakınlaş', 'improveRelations', r.id) +
+            btnSm('İttifak', 'proposeAlliance', r.id) +
+            (rel.treaty === 'war' ? btnSm('Ateşkes', 'ceasefire', r.id) : btnSm('Savaş Aç', 'declareWar', r.id, 'primary')) +
+            btnSm('Ambargo', 'embargo', r.id) +
+            btnSm('Casusluk', 'espionage', r.id) +
+            btnSm('Suikast', 'assassinate', r.id, 'primary') +
+            btnSm('Toprak Savaşı', 'territoryWar', r.id, 'primary') +
+          '</div></div>';
+      });
+      return h;
+    },
+
+    politics() {
+      const f = pf(); const lvl = H.corruptionLevel(f);
+      let h = title('Adliye & Siyaset') +
+        card('Yozlaşma', statLine('Yozlaşma Seviyesi', lvl, 'para') +
+          '<div class="dim" style="margin-top:6px">Yüksek yozlaşma: ısıyı bastırır, baskınları sızdırır, dosyaları kapatır.</div>');
+      h += '<div class="card"><h3>Rüşvet Listesi</h3>';
+      D.officials.forEach(o => {
+        const owned = f.corruption[o.id];
+        h += '<div class="row"><span>' + esc(o.name) + '<div class="dim">yozlaşma +' + o.corruption + ' · bakım ' + money(o.upkeep) + '/ay</div></span>' +
+          (owned ? '<span class="pill ally">cepte</span>' : btnSm(money(o.cost), 'bribe', o.id, 'gold')) + '</div>';
+      });
+      return h + '</div>';
+    },
+
+    intel() {
+      const f = pf();
+      let h = title('İstihbarat') +
+        card('Federal Takip',
+          statLine('Federal Heat', f.federalHeat || 0, 'heat') +
+          rowKV('Telefon dinleme', f.wiretapTicks > 0 ? '<span class="red">AKTİF (' + f.wiretapTicks + ' ay)</span>' : 'yok') +
+          rowKV('Kırmızı bülten', f.redNotice ? '<span class="red">EVET</span>' : 'hayır') +
+          rowKV('Kaçakçılık hacmi', Math.round(f.smuggleVolume || 0)) +
+          '<div class="dim" style="margin-top:6px">FBI/Interpol/MİT/Europol yerel korumayı bypass eder; aşırı yozlaşma + kaçakçılık dikkat çeker.</div>');
+      const feed = G.world.newsFeed.filter(n => /agency|wiretap|raid|escape|corruption|federal|Federal|FBI|Interpol/.test(n.type) || /FBI|Interpol|MİT|Europol|dinle|donduruldu|bülten/.test(n.text)).slice(0, 12);
+      h += '<div class="card"><h3>Raporlar</h3><div class="feed">' + (feed.length ? feed.map(n => '<div>[Y' + yearOf(n.tick) + '] ' + esc(n.text) + '</div>').join('') : '<div class="dim">Şimdilik temiz.</div>') + '</div></div>';
+      return h;
+    },
+
+    prison() {
+      const b = boss();
+      if (!A.engine.isInPrison(G) || !b.prison) {
+        return title('Hapishane') + card('Özgürsün', '<div class="dim">Şu an dışarıdasın. Tutuklanırsan bu ekran hücre moduna geçer.</div>');
+      }
+      const p = b.prison;
+      return title('Hücre Modu ⛓️') +
+        '<div class="banner danger">Patron parmaklıklar ardında. Kalan ceza: <b>' + p.sentence + ' ay</b></div>' +
+        card('Hapis Durumu',
+          statLine('Saygınlık', p.respect) + statLine('Konfor', p.comfort) +
+          rowKV('Rüşvetli gardiyan', p.guards) + rowKV('Devşirilen', p.recruits.length) + statLine('Sağlık', b.attributes.health)) +
+        card('Eylemler',
+          '<div class="btn-grid">' + btn('Ring Dövüşü', 'prisonFight', '', '', '') + btn('Gardiyan Rüşveti', 'prisonBribeGuard', '', '', 'gold') +
+          btn('Mahkum Devşir', 'prisonRecruit', '', '', '') + btn('İsyan Çıkar', 'prisonEscape', '', 'riot', 'primary') + '</div>' +
+          '<div class="btn-grid" style="margin-top:8px">' + btn('Tünel Kaz', 'prisonEscape', '', 'tunnel', 'primary') + btn('Sahte Tahliye', 'prisonEscape', '', 'bribe', 'primary') + '</div>');
+    },
+
+    dynasty() {
+      const f = pf(), b = boss();
+      const kids = b.childrenIds.map(id => G.characters[id]).filter(Boolean);
+      let h = title('Hanedan') +
+        card('Aile',
+          rowKV('Eş', b.spouseId ? esc((G.characters[b.spouseId] || {}).name) : '<span class="dim">yok</span>') +
+          rowKV('Çocuk', kids.length) + rowKV('Nesil', G.dynasty.generation) +
+          rowKV('Hanedan Skoru', '<span class="gold">' + H.dynastyScore(G) + '</span>') +
+          '<div class="btn-grid" style="margin-top:8px">' +
+            (b.spouseId ? '' : btn('Evlen', 'marry', '', '', 'gold')) +
+            (b.spouseId ? btn('Çocuk Sahibi Ol', 'haveChild', '', '', 'gold') : '') + '</div>');
+      h += '<div class="card"><h3>Çocuklar & Varis</h3>';
+      h += kids.length ? kids.map(c => '<div class="row"><span>' + esc(c.name) + ' <span class="dim">' + c.age + ' yaş · ' + esc(c.traits[0] || '') + '</span>' + (c.isHeir ? ' <span class="pill ally">veliaht</span>' : '') + '</span>' + (c.status !== 'dead' && c.age >= A.rules.childAdultAge ? btnSm('Varis Yap', 'setHeir', c.id, 'gold') : '<span class="dim">küçük</span>') + '</div>').join('') : '<div class="dim">Henüz çocuk yok.</div>';
+      // reşit üyeleri de varis adayı yap
+      const adults = activeMembers(f).filter(c => c.role !== 'BOSS' && c.age >= A.rules.childAdultAge);
+      if (adults.length) h += '<div class="dim" style="margin-top:8px">Ekipten varis:</div>' + adults.slice(0, 4).map(c => '<div class="row"><span>' + esc(c.name) + (c.isHeir ? ' <span class="pill ally">veliaht</span>' : '') + '</span>' + btnSm('Varis Yap', 'setHeir', c.id) + '</div>').join('');
+      h += '</div>';
+      h += '<div class="card"><h3>Uluslararası Kaçış</h3>' +
+        '<select class="input" id="haven" style="margin-bottom:8px">' + D.havens.map(hv => '<option value="' + esc(hv.name) + '">' + esc(hv.name) + (hv.extradition ? ' (iade var)' : ' (iade yok)') + '</option>').join('') + '</select>' +
+        btn('Yurtdışına Kaç (rüşvet)', 'fleeCountry', '', '', 'primary') +
+        (f.inExile ? '<div class="banner gold" style="margin-top:8px">Sürgündesin: ' + esc(f.city) + ' · uzaktan operasyon (gelir cezası)</div>' : '') + '</div>';
+      h += '<div class="card"><h3>Legacy Chronicle</h3>' + G.dynasty.history.map(ch => '<div class="row"><span><b>N' + ch.generation + '</b> ' + esc(ch.bossName) + '</span><span class="dim">' + (ch.startedYear || '?') + (ch.endedYear ? '–' + ch.endedYear : '') + ' · zirve ' + money(ch.peakWealth || 0) + '</span></div>').join('') + '</div>';
+      return h;
+    },
+
+    achievements() {
+      const un = G.achievements.unlocked; const total = D.achievements.length; const got = Object.keys(un).length;
+      let h = title('Başarımlar') + card('Galeri', rowKV('Açılan', '<span class="gold">' + got + ' / ' + total + '</span>') + bar(got / total * 100, 'heat').replace('heat', 'para'));
+      h += '<div class="ach-grid">';
+      D.achievements.forEach(a => {
+        const on = un[a.id] != null;
+        h += '<div class="ach ' + (on ? 'on' : 'off') + '"><div class="c">' + esc(a.cat) + '</div><div class="n">' + (on ? '🏆 ' : '🔒 ') + esc(a.name) + '</div></div>';
+      });
+      return h + '</div>';
+    },
+
+    console() {
+      let h = title('Konsol & Tanı');
+      const t = G.__lastTest;
+      h += card('Sistem',
+        rowKV('Sürüm', 'v' + A.version) + rowKV('Tick (ay)', G.clock.tick) +
+        rowKV('Faz sayısı', A.engine.PHASES.length) + rowKV('Save sürümü', A.state.CURRENT_VERSION) +
+        (t ? rowKV('Self-test', (t.ok ? '<span class="green">' : '<span class="red">') + t.passed + '/' + t.total + '</span>') : '') +
+        '<div class="btn-grid c3" style="margin-top:8px">' + btn('Self-Test', 'selftest', '', '', '') + btn('Kaydet', 'save', '', '', '') + btn('Yükle', 'load', '', '', '') + '</div>' +
+        '<div class="btn-grid" style="margin-top:8px">' + btn('Dışa Aktar', 'export', '', '', 'ghost') + btn('Yeni Oyun', 'newGame', '', '', 'primary') + '</div>');
+      h += '<div class="card"><h3>Yaşayan Dünya — Haber Akışı</h3><div class="feed">' +
+        (G.world.newsFeed.length ? G.world.newsFeed.slice(0, 30).map(n => '<div>[Y' + yearOf(n.tick) + '] ' + esc(n.text) + '</div>').join('') : '<div class="dim">Henüz haber yok.</div>') + '</div></div>';
+      return h;
+    },
+  };
+
+  /* ---------- görünüm yardımcıları ---------- */
+  const title = t => '<div class="view-title">' + t + '</div>';
+  const card = (h, body) => '<div class="card"><h3>' + h + '</h3>' + body + '</div>';
+  const rowKV = (k, v) => '<div class="row"><span class="muted">' + k + '</span><span>' + v + '</span></div>';
+  const statLine = (l, v, cls) => '<div class="row" style="display:block;padding:6px 0"><div style="display:flex;justify-content:space-between"><span class="muted">' + l + '</span><span>' + Math.round(v) + '</span></div>' + bar(v, cls || 'para').replace('para', cls === 'heat' ? 'heat' : 'para') + '</div>';
+  const dataAttrs = (act, id, arg) => 'data-act="' + act + '"' + (id !== '' && id != null ? ' data-id="' + esc(id) + '"' : '') + (arg ? ' data-arg="' + esc(arg) + '"' : '');
+  const btn = (label, act, id, arg, cls) => '<button class="btn ' + (cls || '') + '" ' + dataAttrs(act, id, arg) + '>' + label + '</button>';
+  const btnSm = (label, act, id, cls) => '<button class="btn sm ' + (cls || '') + '" ' + dataAttrs(act, id, '') + '>' + label + '</button>';
+
+  /* ---------- navigasyon + render ---------- */
+  function renderNav() {
+    const inPrison = A.engine.isInPrison(G);
+    $('nav').innerHTML = NAV.map(n => {
+      const alert = (n.id === 'prison' && inPrison) ? ' alert' : '';
+      return '<button class="navbtn' + (view === n.id ? ' active' : '') + alert + '" data-act="setView" data-id="' + n.id + '"><span class="i">' + n.icon + '</span><span class="t">' + n.label + '</span></button>';
+    }).join('');
+  }
+  function renderAdvance() {
+    const label = A.engine.isInPrison(G) ? '⏭️ AY GEÇİR (+1 Yıl)' : '⏭️ YAŞ AL (+1 YIL)';
+    $('advancebar').innerHTML = btn(label, 'advanceYear', '', '', 'primary');
+  }
+  function render() {
+    if (!G) return;
+    renderTop();
+    $('view').innerHTML = (VIEWS[view] || VIEWS.character)();
+    renderAdvance(); renderNav();
+  }
+
+  /* ---------- yaşam döngüsü ---------- */
+  function persist() { try { A.persist.save('auto', G); } catch (e) { } }
+  function newGame() {
+    G = A.state.createNewGame((Date.now() >>> 0) ^ Math.floor(Math.random() * 1e9));
+    victoryShown = false; view = 'character'; closeModal(); persist();
+    if (G.pendingEvent) showStart(); render();
+  }
+  function showStart() {
+    const ev = G.pendingEvent; if (!ev) return;
+    openModal('<h2>Başlangıç</h2><p>' + esc(ev.prompt) + '</p>' +
+      ev.options.map(o => '<div class="opt">' + btn(esc(o.label), 'startChoice', o.id, '', 'primary') + '<div class="d">' + esc(o.desc) + '</div></div>').join(''), true);
+  }
+  function showGameOver() {
+    openModal('<h2>Hanedan Çöktü</h2><p>Geriye varis kalmadı. Bir imparatorluk tarihe karıştı. Hanedan Skoru: <b>' + H.dynastyScore(G) + '</b></p>' + btn('Yeni Hanedan Kur', 'newGame', '', '', 'primary'), true);
+  }
+  function showVictory() {
+    openModal('<h2 style="color:var(--gold)">👑 ZAFER</h2><p>Tüm endgame hedeflerine ulaştın; hanedanlığın efsaneye dönüştü. Skor: <b>' + H.dynastyScore(G) + '</b></p>' + btn('Devam Et', 'closeModal', '', '', 'gold'), false);
+  }
+  function afterChange() {
+    persist();
+    if (A.engine.isInPrison(G) && view !== 'prison') view = 'prison';
+    render();
+    if (G.flags.gameOver) showGameOver();
+    else if (G.flags.victory && !victoryShown) { victoryShown = true; showVictory(); }
+  }
+
+  /* ---------- eylem yönlendirme ---------- */
+  function val(id, def) { const e = $(id); return e ? e.value : def; }
+  function msg(res, okMsg) {
+    if (!res) { toast(okMsg || 'Tamam', 'ok'); return; }
+    if (res.ok === false) {
+      const m = { no_money: 'Yetersiz para', limit: 'Ekip limiti dolu', married: 'Zaten evli', no_spouse: 'Önce evlen', owned: 'Zaten cepte', standing_low: 'İlişki yetersiz', not_in_prison: 'Hapiste değilsin', boss: 'Patron olmaz', no_stock: 'Stok yok', no_target: 'Hedef yok' };
+      toast(m[res.reason] || ('Olmadı (' + (res.reason || '?') + ')'), 'bad');
+    } else toast(okMsg || 'Tamam', 'ok');
+  }
+
+  function dispatch(act, id, arg) {
+    if (!G && act !== 'newGame') return;
+    switch (act) {
+      case 'setView': view = id; render(); return;
+      case 'closeModal': closeModal(); return;
+      case 'newGame': newGame(); return;
+      case 'startChoice': A.state.applyStartChoice(G, id); closeModal(); afterChange(); return;
+      case 'advanceYear': { A.engine.advanceYear(G); toast('Bir yıl geçti', 'gold'); afterChange(); return; }
+      case 'save': persist(); toast('Kaydedildi', 'ok'); return;
+      case 'load': { const l = A.persist.load('auto'); if (l) { G = l; toast('Yüklendi', 'ok'); afterChange(); } else toast('Kayıt yok', 'bad'); return; }
+      case 'export': { const s = A.persist.exportSave(G); openModal('<h2>Dışa Aktar</h2><p>Bu metni yedekle:</p><textarea class="input" style="height:140px">' + esc(s) + '</textarea>' + btn('Kapat', 'closeModal', '', '', '')); return; }
+      case 'selftest': { const t = A.test.selfTest(); G.__lastTest = { ok: t.ok, passed: t.passed, total: t.total }; toast('Self-test ' + t.passed + '/' + t.total, t.ok ? 'ok' : 'bad'); render(); return; }
+      case 'hire': msg(A.commands.hire(G, { job: val('hireJob', 'none') }), 'İşe alındı'); break;
+      case 'fire': msg(A.commands.fire(G, id), 'Kovuldu'); break;
+      case 'assignJob': msg(A.commands.assignJob(G, id, val('job_' + id, 'none')), 'Pozisyon atandı'); break;
+      case 'surveil': { const r = A.commands.surveil(G, id); r && r.ok ? toast(r.hint || 'Takip edildi', 'ok') : msg(r); break; }
+      case 'interrogate': { const r = A.commands.interrogate(G, id); r && r.exposed ? toast('KÖSTEBEK İFŞA!', 'bad') : (r && r.falseAlarm ? toast('Yanlış alarm (paranoya)', 'bad') : msg(r, 'Sorgulandı')); break; }
+      case 'loyaltyTest': { const r = A.commands.loyaltyTest(G, id); r && r.exposed ? toast('KÖSTEBEK İFŞA!', 'bad') : msg(r, r && r.loyal ? 'Sadık çıktı' : 'Test edildi'); break; }
+      case 'silence': { const r = A.commands.silence(G, id); r && r.ok ? toast(r.wasMole ? 'Hain susturuldu' : 'Masum infaz! Ekip tedirgin', r.wasMole ? 'ok' : 'bad') : msg(r); break; }
+      case 'buyGood': msg(A.commands.buyGood(G, id, +val('tradeQty', 1), val('tradeCity')), 'Satın alındı'); break;
+      case 'sellGood': msg(A.commands.sellGood(G, id, +val('tradeQty', 1), val('tradeCity')), 'Satıldı'); break;
+      case 'bribe': msg(A.commands.bribe(G, id), 'Rüşvet verildi'); break;
+      case 'buyBusiness': msg(A.commands.buyBusiness(G, id), 'İşletme alındı'); break;
+      case 'declareWar': msg(A.commands.declareWar(G, id), 'Savaş ilan edildi'); break;
+      case 'ceasefire': msg(A.commands.ceasefire(G, id), 'Ateşkes'); break;
+      case 'proposeAlliance': msg(A.commands.proposeAlliance(G, id), 'İttifak kuruldu'); break;
+      case 'improveRelations': msg(A.commands.improveRelations(G, id), 'İlişki düzeldi'); break;
+      case 'embargo': msg(A.commands.embargo(G, id), 'Ambargo'); break;
+      case 'espionage': { const r = A.commands.espionage(G, id); r && r.ok ? toast(r.success ? 'İstihbarat: ' + r.result : 'Casus yakalandı', r.success ? 'ok' : 'bad') : msg(r); break; }
+      case 'assassinate': { const r = A.commands.assassinate(G, id); r && r.ok ? toast(r.success ? 'Suikast başarılı' : 'Suikast başarısız', r.success ? 'ok' : 'bad') : msg(r); break; }
+      case 'territoryWar': { const r = A.commands.territoryWar(G, id); r ? toast(r.winnerId === pf().id ? 'Savaşı kazandın!' + (r.captured ? ' Bölge alındı.' : '') : 'Savaşı kaybettin', r.winnerId === pf().id ? 'ok' : 'bad') : toast('Olmadı', 'bad'); break; }
+      case 'prisonFight': { const r = A.commands.prisonFight(G); r && r.ok ? toast(r.win ? 'Ringde kazandın' : 'Ringde yenildin', r.win ? 'ok' : 'bad') : msg(r); break; }
+      case 'prisonBribeGuard': msg(A.commands.prisonBribeGuard(G), 'Gardiyan rüşvetlendi'); break;
+      case 'prisonRecruit': { const r = A.commands.prisonRecruit(G); r && r.ok ? toast(r.recruited ? 'Mahkum devşirildi' : 'İkna olmadı', r.recruited ? 'ok' : 'bad') : msg(r); break; }
+      case 'prisonEscape': { const r = A.commands.prisonEscape(G, arg); r && r.ok ? toast(r.escaped ? '🏃 FİRAR BAŞARILI!' : 'Firar başarısız, ceza uzadı', r.escaped ? 'gold' : 'bad') : msg(r); break; }
+      case 'marry': msg(A.commands.marry(G), 'Evlendin'); break;
+      case 'haveChild': { const r = A.commands.haveChild(G); r && r.ok ? toast('Çocuk doğdu: ' + r.trait, 'gold') : msg(r); break; }
+      case 'setHeir': msg(A.commands.setHeir(G, id), 'Veliaht belirlendi'); break;
+      case 'fleeCountry': { const r = A.commands.fleeCountry(G, val('haven')); r && r.ok ? toast(r.caught ? 'İade! Yakalandın' : 'Yurtdışına kaçtın', r.caught ? 'bad' : 'gold') : msg(r); break; }
+      default: return;
+    }
+    afterChange();
+  }
+
+  /* ---------- olay bağlama ---------- */
+  $('app').addEventListener('click', e => {
+    const el = e.target.closest('[data-act]');
+    if (el) { e.preventDefault(); dispatch(el.getAttribute('data-act'), el.getAttribute('data-id'), el.getAttribute('data-arg')); return; }
+    // modal dışına tıklayınca kapat (zorunlu modal hariç)
+    if (e.target.id === 'overlay' && $('modal').dataset.forced !== '1') closeModal();
+  });
+
+  /* ---------- başlat ---------- */
+  function init() {
+    try { G = A.persist.load('auto'); } catch (e) { G = null; }
+    if (!G) { G = A.state.createNewGame((Date.now() >>> 0) ^ Math.floor(Math.random() * 1e9)); }
+    render();
+    setTimeout(() => { $('splash').classList.add('hide'); }, 850);
+    if (G.pendingEvent) setTimeout(showStart, 700);
+    window.AHTAPOT.ui = { render, dispatch, get game() { return G; } };
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
 </script>
 </body>
