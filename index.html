@@ -146,6 +146,14 @@
     .modal .opt .d { font-size:10.5px; color:var(--muted); margin-top:3px; }
     .evbadge { display:inline-block; font-size:9.5px; font-weight:700; letter-spacing:1.2px; padding:3px 9px;
       border-radius:20px; border:1px solid var(--line2); margin-bottom:8px; }
+    .evtop { height:3px; border-radius:3px; border:0; border-top:3px solid; margin:-4px -4px 12px; opacity:.9; }
+    /* Legacy Memories zaman çizelgesi */
+    .timeline { display:flex; flex-direction:column; gap:2px; }
+    .tl { display:flex; align-items:flex-start; gap:8px; padding:6px 0; border-bottom:1px dashed var(--line); font-size:12px; }
+    .tl:last-child { border-bottom:0; }
+    .tl-y { flex:0 0 38px; color:var(--gold); font-weight:700; font-size:11px; }
+    .tl-t { flex:1; color:var(--fg); line-height:1.4; }
+    .tl-w { color:var(--gold); font-size:10px; letter-spacing:1px; }
     #toast { position:absolute; left:50%; bottom:120px; transform:translateX(-50%) translateY(20px);
       background:rgba(20,10,10,.96); border:1px solid var(--line2); color:var(--fg); font-size:12.5px;
       padding:10px 16px; border-radius:12px; max-width:88%; text-align:center; opacity:0; pointer-events:none;
@@ -3025,7 +3033,7 @@
   if (typeof document === 'undefined' || typeof window === 'undefined' || !window.AHTAPOT) return;
   const A = window.AHTAPOT, H = A.state.helpers, D = A.data;
   const $ = id => document.getElementById(id);
-  let G = null, view = 'character', victoryShown = false;
+  let G = null, view = 'character', victoryShown = false, lastGen = 1;
 
   /* ---------- biçimlendirme ---------- */
   const money = n => { n = Math.round(n || 0); return (n < 0 ? '-' : '') + Math.abs(n).toLocaleString('tr-TR') + '₺'; };
@@ -3082,6 +3090,7 @@
     { id: 'intel', icon: '🛰️', label: 'İstihbarat' },
     { id: 'prison', icon: '⛓️', label: 'Hapis' },
     { id: 'dynasty', icon: '👑', label: 'Hanedan' },
+    { id: 'life', icon: '📜', label: 'Yaşam' },
     { id: 'achievements', icon: '🏆', label: 'Başarım' },
     { id: 'console', icon: '🖥️', label: 'Konsol' },
   ];
@@ -3288,6 +3297,32 @@
       return h;
     },
 
+    life() {
+      const f = pf(), b = boss();
+      const kidsN = b.childrenIds.filter(id => G.characters[id] && G.characters[id].status !== 'dead').length;
+      let h = title('Yaşam') +
+        card('Kişisel Özet',
+          rowKV('İsim', '<b>' + esc(b.name) + '</b> · ' + b.age + ' yaş') +
+          rowKV('Akıbet riski', b.attributes.health < 35 ? '<span class="red">kritik sağlık</span>' : b.vitals.paranoia > 85 ? '<span class="red">delilik sınırı</span>' : '<span class="green">stabil</span>') +
+          (b.spouseId ? rowKV('Eş', esc((G.characters[b.spouseId] || {}).name || '—')) : rowKV('Eş', '<span class="dim">bekâr</span>')) +
+          rowKV('Çocuk', kidsN) + (b.traits.length ? rowKV('Mizaç', esc(b.traits.join(', '))) : '') +
+          statLine('Mutluluk', b.attributes.happiness) + statLine('Sağlık', b.attributes.health) +
+          statLine('Stres', b.psyche.stress, 'para') + statLine('Bağımlılık', b.psyche.addiction, 'para'));
+      // Legacy Memories zaman çizelgesi
+      const mem = (G.legacy && G.legacy.memories) ? G.legacy.memories.slice().reverse() : [];
+      h += '<div class="card"><h3>Hatıralar <span class="dim">Legacy Memories</span></h3>';
+      h += mem.length ? '<div class="timeline">' + mem.slice(0, 30).map(m =>
+        '<div class="tl"><span class="tl-y">Y' + (m.year || yearOf(m.tick)) + '</span><span class="tl-t">' + esc(m.text) + '</span>' + (m.weight ? '<span class="tl-w">' + '★'.repeat(Math.min(5, Math.max(1, Math.round(m.weight / 3)))) + '</span>' : '') + '</div>').join('') + '</div>'
+        : '<div class="dim">Henüz iz bırakacak bir an yaşanmadı. Hayatın seni şekillendirsin.</div>';
+      h += '</div>';
+      // Yaşam günlüğü (kişisel olay akışı)
+      const lifeTypes = { life: 1, memory: 1, birth: 1, marry: 1, death: 1, succession: 1, 'succession.insane': 1, 'succession.life': 1, paranoia: 1, 'prison.release': 1, 'prison.escape': 1, startChoice: 1 };
+      const feed = G.world.newsFeed.filter(n => lifeTypes[n.type]).slice(0, 24);
+      h += '<div class="card"><h3>Yaşam Günlüğü</h3><div class="feed">' +
+        (feed.length ? feed.map(n => '<div>[Y' + yearOf(n.tick) + '] ' + esc(n.text) + '</div>').join('') : '<div class="dim">Günlük boş.</div>') + '</div></div>';
+      return h;
+    },
+
     achievements() {
       const un = G.achievements.unlocked; const total = D.achievements.length; const got = Object.keys(un).length;
       let h = title('Başarımlar') + card('Galeri', rowKV('Açılan', '<span class="gold">' + got + ' / ' + total + '</span>') + bar(got / total * 100, 'heat').replace('heat', 'para'));
@@ -3346,15 +3381,15 @@
   function persist() { try { A.persist.save('auto', G); } catch (e) { } }
   function newGame() {
     G = A.state.createNewGame((Date.now() >>> 0) ^ Math.floor(Math.random() * 1e9));
-    victoryShown = false; view = 'character'; closeModal(); persist();
+    victoryShown = false; lastGen = G.dynasty.generation; view = 'character'; closeModal(); persist();
     if (G.pendingEvent) showStart(); render();
   }
   // Kategori rozetleri (yaşam olayları)
   const CAT = {
-    family: { label: 'AİLE', color: '#ff7a90' }, relationship: { label: 'İLİŞKİ', color: '#ff5fa2' },
-    street: { label: 'SOKAK', color: '#ff0033' }, state: { label: 'DEVLET', color: '#5fa8ff' },
-    personal: { label: 'KİŞİSEL', color: '#c08bff' }, wealth: { label: 'SERVET', color: '#00ff66' },
-    dynasty: { label: 'HANEDAN', color: '#d4af37' },
+    family: { label: 'AİLE', color: '#ff7a90', icon: '👨‍👩‍👧' }, relationship: { label: 'İLİŞKİ', color: '#ff5fa2', icon: '💋' },
+    street: { label: 'SOKAK', color: '#ff0033', icon: '🔫' }, state: { label: 'DEVLET', color: '#5fa8ff', icon: '⚖️' },
+    personal: { label: 'KİŞİSEL', color: '#c08bff', icon: '🧠' }, wealth: { label: 'SERVET', color: '#00ff66', icon: '💼' },
+    dynasty: { label: 'HANEDAN', color: '#d4af37', icon: '👑' },
   };
   function hasDecision() { return !!(G && (G.pendingEvent || (G.eventQueue && G.eventQueue.length))); }
   function maybeShowDecision() { if (hasDecision()) showDecision(); else if (!G.flags.gameOver) closeModal(); }
@@ -3370,9 +3405,10 @@
     const inst = G.eventQueue[0]; if (!inst) { closeModal(); return; }
     const def = A.data.lifeEvents.find(e => e.id === inst.defId);
     if (!def) { G.eventQueue.shift(); maybeShowDecision(); return; }
-    const cat = CAT[def.category] || { label: def.category.toUpperCase(), color: 'var(--muted)' };
+    const cat = CAT[def.category] || { label: def.category.toUpperCase(), color: 'var(--muted)', icon: '•' };
     const prompt = (typeof def.prompt === 'function') ? def.prompt(inst.ctx || {}) : (def.prompt || def.title);
-    openModal('<div class="evbadge" style="color:' + cat.color + ';border-color:' + cat.color + '">' + cat.label + (G.eventQueue.length > 1 ? ' · +' + (G.eventQueue.length - 1) : '') + '</div>' +
+    openModal('<div class="evtop" style="border-color:' + cat.color + '"></div>' +
+      '<div class="evbadge" style="color:' + cat.color + ';border-color:' + cat.color + '">' + cat.icon + ' ' + cat.label + (G.eventQueue.length > 1 ? ' · +' + (G.eventQueue.length - 1) + ' bekliyor' : '') + '</div>' +
       '<h2>' + esc(def.title) + '</h2><p>' + esc(prompt) + '</p>' +
       def.options.map(o => '<div class="opt">' + btn(esc(o.label), 'resolveEvent', o.id, '', 'primary') + (o.hint ? '<div class="d">' + esc(o.hint) + '</div>' : '') + '</div>').join(''), true);
   }
@@ -3381,15 +3417,34 @@
     openModal('<h2>Hanedan Çöktü</h2><p>Geriye varis kalmadı. Bir imparatorluk tarihe karıştı. Hanedan Skoru: <b>' + H.dynastyScore(G) + '</b></p>' + btn('Yeni Hanedan Kur', 'newGame', '', '', 'primary'), true);
   }
   function showVictory() {
-    openModal('<h2 style="color:var(--gold)">👑 ZAFER</h2><p>Tüm endgame hedeflerine ulaştın; hanedanlığın efsaneye dönüştü. Skor: <b>' + H.dynastyScore(G) + '</b></p>' + btn('Devam Et', 'closeModal', '', '', 'gold'), false);
+    openModal('<h2 style="color:var(--gold)">👑 ZAFER</h2><p>Tüm endgame hedeflerine ulaştın; hanedanlığın efsaneye dönüştü. Skor: <b>' + H.dynastyScore(G) + '</b></p>' + btn('Devam Et', 'continueAfterModal', '', '', 'gold'), false);
+  }
+  // Hayat Özeti (otomatik nekroloji) — koltuk devri sonrası ölen patron için
+  const FATE = { death: 'doğal/şiddet sonucu öldü', insane: 'aklını yitirdi', life: 'ömür boyu hapse mahkûm oldu' };
+  function buildObituary(gen) {
+    const hist = G.dynasty.history || [];
+    const ch = hist.find(c => c.generation === gen) || hist[hist.length - 2] || {};
+    const mems = (G.legacy && G.legacy.memories) ? G.legacy.memories.filter(m => m.gen === gen) : [];
+    const years = (ch.endedYear && ch.startedYear) ? (ch.endedYear - ch.startedYear) : null;
+    let html = '<div class="evtop" style="border-color:#888"></div><div class="evbadge" style="color:#cbb; border-color:#555">⚰️ HAYAT ÖZETİ</div>' +
+      '<h2>' + esc(ch.bossName || 'Patron') + '</h2>' +
+      '<p>' + (ch.startedYear ? 'Hüküm: ' + ch.startedYear + '–' + (ch.endedYear || '?') + (years != null ? ' (' + years + ' yıl)' : '') + ' · Nesil ' + gen + '<br>' : '') +
+      'Akıbet: <b>' + (FATE[ch.fate] || 'devredildi') + '</b>' + (ch.peakWealth ? '<br>Zirve servet: <b>' + money(ch.peakWealth) + '</b>' : '') + '</p>';
+    if (mems.length) html += '<div class="timeline" style="margin-bottom:14px">' + mems.slice(-8).map(m => '<div class="tl"><span class="tl-y">Y' + (m.year || '?') + '</span><span class="tl-t">' + esc(m.text) + '</span></div>').join('') + '</div>';
+    else html += '<p class="dim">Sessiz bir hayat; geriye az iz kaldı.</p>';
+    html += btn('Veliaht ile devam et', 'continueAfterModal', '', '', 'gold');
+    openModal(html, true);
   }
   function afterChange() {
     persist();
     if (A.engine.isInPrison(G) && view !== 'prison') view = 'prison';
     render();
-    if (G.flags.gameOver) showGameOver();
-    else if (G.flags.victory && !victoryShown) { victoryShown = true; showVictory(); }
-    else if (hasDecision()) showDecision();      // bekleyen kararı modal olarak göster
+    if (G.flags.gameOver) { showGameOver(); return; }
+    if (G.flags.victory && !victoryShown) { victoryShown = true; showVictory(); return; }
+    if (G.dynasty.generation > lastGen) {            // koltuk devri oldu → nekroloji
+      const prevGen = lastGen; lastGen = G.dynasty.generation; buildObituary(prevGen); return;
+    }
+    if (hasDecision()) showDecision();               // bekleyen kararı modal olarak göster
   }
 
   /* ---------- eylem yönlendirme ---------- */
@@ -3407,6 +3462,7 @@
     switch (act) {
       case 'setView': { view = id; render(); const ve = $('view'); ve.classList.remove('swap'); void ve.offsetWidth; ve.classList.add('swap'); return; }
       case 'closeModal': closeModal(); return;
+      case 'continueAfterModal': closeModal(); maybeShowDecision(); return;
       case 'newGame': newGame(); return;
       case 'startChoice': A.state.applyStartChoice(G, id); afterChange(); return;
       case 'resolveEvent': { const r = A.commands.resolveEvent(G, id); if (r && r.text) toast(r.text, 'gold'); afterChange(); return; }
@@ -3462,6 +3518,7 @@
   function init() {
     try { G = A.persist.load('auto'); } catch (e) { G = null; }
     if (!G) { G = A.state.createNewGame((Date.now() >>> 0) ^ Math.floor(Math.random() * 1e9)); }
+    lastGen = G.dynasty.generation;
     render();
     setTimeout(() => { $('splash').classList.add('hide'); }, 850);
     if (hasDecision()) setTimeout(showDecision, 700);
